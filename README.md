@@ -33,6 +33,10 @@ is available as:
 uv run basement
 ```
 
+That command builds the local static basement dashboard at
+`build/basement-site/index.html`. Use `--refresh-weather` to refetch public
+weather API data instead of using the local cache.
+
 ## Layout
 
 - `src/basement_analysis/` is the production package. New analysis, physics,

@@ -38,11 +38,13 @@ Standing preferences and constraints:
 - [Define local static site audience, privacy, and core views](issues/13-define-dashboard-audience-privacy-and-core-views.md) — build the first local static site for the owner-analyst as one dense analytical page covering freshness, daily trends, raw plots, weather overlay, and cautious hypothesis evidence.
 - [Refocus roadmap on local CSV-to-static-site first](issues/21-refocus-roadmap-on-local-csv-to-static-site-first.md) — defer SES, S3, `robjhornby.com`, AWS/Cloudflare setup, and server automation until the local CSV-driven analysis produces locally viewable static web pages end to end.
 - [Establish Python project quality baseline](issues/14-establish-python-project-quality-baseline.md) — use an installable `src/basement_analysis` production package with Ruff, strict Pyright, Pytest, documented `uv` checks, and prototype-to-production migration rules.
+- [Plan physics and metrology report artifact](issues/15-plan-physics-and-metrology-report-artifact.md) — make the physics/metrology report a locally generated companion explanation page linked from the dense dashboard, with visible equations, uncertainty budget, event comparability, cautious hypothesis evidence, and publication polish deferred.
+- [Prototype uncertainty-library pipeline integration](issues/16-prototype-uncertainty-library-pipeline-integration.md) — keep MetroloPy/rich uncertainty objects in pure Python analysis and report boundaries, use Polars expressions for bulk scalar columns, and avoid DuckDB Python UDFs or object columns by default.
+- [Build weather-inclusive end-to-end prototype](issues/17-build-weather-inclusive-end-to-end-prototype.md) — `uv run basement` now generates a local static dashboard from sensor CSVs, event boundaries, Open-Meteo outdoor humidity, and EA rainfall at `build/basement-site/index.html`.
 
 ## Fog
 
 - Detailed table schema and DuckLake partitioning should wait until desired dashboard queries are clearer; do not let that block an early local weather-inclusive prototype.
-- The final physics explainer/report structure should wait until the model scope and uncertainty treatment have been chosen.
 - Blog/article topics are promising, especially basement drying physics and uncertainty propagation, but should wait until the project has one or two validated analytical results.
 - Alerting, anomaly detection, and automated leak warnings may be useful later, but the acceptable false-positive/false-negative tradeoff is not yet clear.
 - Sensor placement strategy, new sensors, or auxiliary measurements may become important after the current dataset and uncertainty budget are understood.
