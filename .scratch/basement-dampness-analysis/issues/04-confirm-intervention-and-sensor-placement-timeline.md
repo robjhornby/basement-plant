@@ -20,7 +20,7 @@ Known event timeline:
 | --- | --- | --- |
 | `2026-06-28 12:40` | known | Basement clearing started. |
 | `2026-06-28 16:20` | known | Carpet, underlay, and carpet grippers removed; room left bare, then a couple of boxes and a few other items were put back. |
-| `2026-07-01 21:00` | known | Dehumidifier installed in the centre of the room; extractor fan turned off; dehumidifier set to `50% RH`. |
+| `2026-07-01 21:00` | known | Dehumidifier installed in the centre of the room; extractor fan turned off after having run continuously throughout the prior sensor-data history; dehumidifier set to `50% RH`. |
 | `2026-07-02 14:35` | known | Small fan added to introduce airflow, pointing at the wall with the radiator. |
 | `2026-07-02 14:40` | known | Temperature/humidity sensor moved from the wall with the radiator to a box near the extractor fan. |
 | `2026-07-02 18:30` | uncertain | Dehumidifier rotated so the intake faced away from the wetter side of the room; a box was moved and may have affected airflow. |
@@ -54,15 +54,8 @@ Still unknown and worth preserving as caveats: tank emptying or continuous-drain
 
 ## Comments
 
-Additional clarification from the user:
+Additional grilling produced a structured analysis context asset:
 
-- Dehumidifier model: MeacoDry Arete Two 25L Dehumidifier and Air Purifier.
-- Manual reference captured at `docs/reference/meaco-arete-two-25l-manual-notes.md`; official PDF source is `https://www.meaco.de/atlantis-media/files/aretetwo-20l25l-manual-uk-150724.pdf`.
-- Drainage mode: internal tank, not continuous drainage.
-- The tank has not yet been emptied during the recorded period. Future tank-empty timestamps will be recorded in `data/basement_events.csv` in the short term.
-- The eventual web interface should support event logging, including tank-full and tank-emptied events.
-- Current settings: Smart Humidity mode, `50% RH` target, no timer, not Laundry mode.
-- Air purifier behaviour: purification runs when the dehumidifier runs; the device is not in always-purify-only mode.
-- Basement ventilation: two vents are always open and should be treated as fixed background ventilation, not events.
-- Door opening/closing will not be manually recorded and should be treated as an unobserved ventilation confounder unless inferred from data.
-- Extractor fan events should be recorded if the extractor is turned on again, but the plan is to keep it off for the duration of the project.
+- [Intervention, Room, And Device Context](../research/04-intervention-room-and-device-context.md)
+
+Use that asset for project-specific room geometry, sensor placement, dehumidifier operating state, ventilation assumptions, visible moisture observations, event-logging rules, and remaining caveats. Stable manufacturer/manual facts live separately in `docs/reference/meaco-arete-two-25l-manual-notes.md`, with the copied PDF at `docs/reference/aretetwo-20l25l-manual-uk-150724.pdf`.

@@ -1,6 +1,8 @@
-# MeacoDry Arete Two 25L Manual Notes
+# MeacoDry Arete Two 20L/25L Manual Notes
 
 Source: official Meaco PDF, `Arete Two 20 / 25L`, downloaded from `https://www.meaco.de/atlantis-media/files/aretetwo-20l25l-manual-uk-150724.pdf`.
+
+Local PDF copy: [aretetwo-20l25l-manual-uk-150724.pdf](aretetwo-20l25l-manual-uk-150724.pdf)
 
 PDF metadata from local `pdfinfo` extraction:
 
@@ -9,24 +11,12 @@ PDF metadata from local `pdfinfo` extraction:
 - Pages: 27
 - Applies to: Arete Two 20L and 25L models
 
-This is an analysis reference, not a full copy of the manual. Use the PDF as the source of truth for safety, maintenance, warranty, and app setup instructions.
+These notes contain stable manual facts only. Project-specific operating state, event vocabulary, and basement observations belong in the wayfinder issue tracker.
 
-## Confirmed Device
+## Smart Humidity Mode
 
-Project device:
-
-- Model: MeacoDry Arete Two 25L Dehumidifier and Air Purifier
-- Drainage mode in this basement project: internal tank, not continuous drainage
-- Active user setting: Smart Humidity mode, `50% RH` target
-- Timer: not used
-- Laundry mode: not used
-- Air purification: H13 HEPA purification occurs while the dehumidifier is running if the HEPA filter is installed; the unit is not being run in always-purify-only mode.
-
-## Analysis-Relevant Controls
-
-Smart Humidity mode:
-
-- The default target is `55% RH`, but the variable humidistat can be cycled through `70`, `65`, `60`, `55`, `50`, `45`, `40`, and continuous mode.
+- Smart Humidity mode defaults to a `55% RH` target.
+- The variable humidistat can be cycled through `70`, `65`, `60`, `55`, `50`, `45`, `40`, and continuous mode.
 - At a normal RH target, the dehumidifier stops after reaching roughly `target - 3% RH`.
 - Every 30 minutes, the fan runs to check humidity.
 - If humidity rises more than `3% RH` above the target, the compressor starts again.
@@ -35,83 +25,67 @@ Smart Humidity mode:
   - within `15% RH` of target: low fan speed
   - `15% RH` or more above target: medium fan speed
 
-Continuous target:
+## Continuous Target
 
-- Runs regardless of humidity target and stops only when the water tank is full.
-- This project is not currently using continuous mode.
+- In continuous target mode, the dehumidifier continues to run regardless of humidity level.
+- In continuous target mode, it turns off only when the water tank is full.
 
-Smart Laundry mode:
+## Smart Laundry Mode
 
-- Uses `35% RH` target and high fan speed.
-- Runs for 6 hours, then turns off.
-- If humidity reaches about `32% RH`, the compressor stops but the fan continues; the compressor restarts around `38% RH`.
-- This project is not currently using laundry mode.
+- Smart Laundry mode uses a `35% RH` target and high fan speed.
+- Smart Laundry mode runs for 6 hours, then turns off.
+- If humidity reaches about `32% RH`, the compressor stops but the fan continues.
+- The compressor restarts around `38% RH` while Smart Laundry mode is still active.
 
-Air Purification mode:
+## Air Purification Mode
 
-- Purifies without dehumidifying.
-- Entered by holding the Smart Humidity button.
-- This project is not currently using purifier-only mode.
+- Air Purification mode purifies without dehumidifying.
+- Air Purification mode is entered by holding the Smart Humidity button.
+- If an H13 HEPA filter is installed, the unit purifies while dehumidifying; it does not need to be in Air Purification mode for filtration to occur.
 
-Night mode:
+## Night Mode
 
-- Reduces fan speed to low only if currently high.
-- Turns off display lights and button beeps.
-- Should be recorded if used, because it changes fan/control behaviour.
+- Night Mode reduces fan speed to low only if the unit is currently in high fan speed.
+- Night Mode turns off display lights and button beeps.
+- In Night Mode, tank-full beeps are suppressed.
 
-Timer:
+## Timer
 
-- Supports on/off timer values from 1 to 24 hours.
-- This project is not currently using a timer.
+- The timer supports on/off timer values from 1 to 24 hours.
+
+## Display And Indicators
+
+- The display shows current humidity and target humidity when the dehumidifier is on.
+- The dehumidifying indicator lights when the compressor is running.
+- The dehumidifying indicator turns off while the unit is checking humidity and while defrosting.
+- The air purification indicator lights when the dehumidifier is in Air Purification mode only.
+- In standby, the WET indicator lights if relative humidity measures above `70% RH`.
 
 ## Tank Behaviour
 
-The 25L model has a `4.8 L` water tank.
-
-When the tank becomes full:
-
-- the unit continues fan-only operation for about 3 minutes to clear water from the coils;
-- the tank-full indicator lights and the unit beeps five times, except in Night Mode;
-- the dehumidifier stops until the tank is emptied and reinserted;
-- after the tank is emptied and reinserted, the unit resumes the previous mode.
-
-Analysis consequence:
-
-- `dehumidifier_tank_full` and `dehumidifier_tank_emptied` are intervention events.
-- Tank-full periods can look like real moisture rebound because water extraction has stopped.
-- Tank-empty events can look like drying resuming.
-- The project should record both timestamps when known.
+- The 25L model has a `4.8 L` water tank.
+- When the tank becomes full, the unit continues fan-only operation for about 3 minutes to clear water from the coils.
+- After that fan-only period, the tank-full indicator lights and the unit beeps five times, except in Night Mode.
+- The dehumidifier stops until the tank is emptied and reinserted.
+- After the tank is emptied and reinserted, the unit resumes the previous mode.
+- The tank float triggers the tank-full shutoff. The manual says the float must not be removed.
 
 ## Drainage
 
-The manual supports two water collection modes:
-
-- internal tank
-- continuous drainage through a standard garden hose using the supplied right-angle adaptor
-
-Continuous drainage requires a gravity drain path with no kinks, bends, or blockages.
-
-Project state:
-
-- continuous drainage is not currently used.
-- if continuous drainage is adopted later, record it as an event because tank-full shutdowns would no longer apply.
+- The manual supports two water collection modes:
+  - internal tank
+  - continuous drainage through a standard garden hose using the supplied right-angle adaptor
+- Continuous drainage requires a gravity drain path with no kinks, bends, or blockages.
 
 ## Airflow And Filters
 
-Manual-relevant airflow points:
-
-- The louvre should be open during use.
+- The louvre must be open during use.
 - The H13 HEPA filter is optional.
-- If a H13 HEPA filter is installed, the unit purifies while dehumidifying.
-- Removing the HEPA filter reduces noise by roughly 4-5 dB according to the manual.
-- Dirty dust or HEPA filters can reduce dehumidification by restricting airflow.
-- The dust filter should be cleaned regularly; the manual says at least every two weeks under regular use.
-
-Analysis consequence:
-
-- Filter removal/replacement/cleaning can change airflow and apparent drying rate.
-- H13 HEPA installed versus removed should be recorded if it changes during the project.
-- Louvre position changes should be recorded if they are deliberate and persistent.
+- The unit can dehumidify without the H13 HEPA filter.
+- Removing the H13 HEPA filter reduces noise by roughly 4-5 dB according to the manual.
+- Dirty dust or HEPA filters can restrict airflow and reduce dehumidification.
+- The dust filter should be cleaned at least every two weeks under regular use.
+- The H13 HEPA filter should be replaced when it changes from white to grey; the manual gives roughly every 3 months as environment-dependent guidance.
 
 ## 25L Specifications
 
@@ -135,26 +109,3 @@ Manual specification values for the 25L model:
 | Operating temperature | `5 C` to `35 C` |
 | Refrigerant | `R290 / 90 g` |
 | Water tank size | `4.8 L` |
-
-## Event Types To Support
-
-Add or preserve these event types in the project event vocabulary:
-
-- `dehumidifier_model_confirmed`
-- `dehumidifier_mode_changed`
-- `dehumidifier_target_rh_changed`
-- `dehumidifier_timer_changed`
-- `dehumidifier_tank_full`
-- `dehumidifier_tank_emptied`
-- `dehumidifier_drainage_changed`
-- `dehumidifier_filter_changed`
-- `dehumidifier_filter_cleaned`
-- `dehumidifier_louvre_changed`
-- `dehumidifier_night_mode_changed`
-
-## Remaining Manual-Related Unknowns
-
-- Whether the H13 HEPA filter is currently installed.
-- Whether the louvre is open and whether its direction changed during the recorded period.
-- Whether Night Mode has ever been used during the project period.
-- Whether the Meaco app has useful event history or telemetry that could reduce manual logging.

@@ -12,3 +12,5 @@ What is the smallest end-to-end prototype that loads the basement sensor data, a
 Build this after the existing data/prototype assumptions are profiled, the Caversham weather source is chosen, and the Python project baseline is in place. It should prioritize fast feedback from visible data and calculations over deep physical modelling. Use it to help decide later how much modelling sophistication is justified.
 
 Use `data/basement_events.csv` as a first-class input. The prototype should overlay events on plots and calculate metrics within event-bounded periods rather than relying on the old inferred dehumidifier boundary or broad first/latest windows that cross fan, sensor-placement, and dehumidifier-orientation changes.
+
+Use [Intervention, Room, And Device Context](../research/04-intervention-room-and-device-context.md) for sensor labels, room/device context, event-period definitions, and caveats to display or preserve in generated outputs.
