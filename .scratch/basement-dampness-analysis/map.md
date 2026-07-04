@@ -4,7 +4,7 @@ Label: wayfinder:map
 
 ## Notes
 
-This effort is about turning the existing basement thermohygrometer CSV prototype into a physically defensible analysis, automated ingestion pipeline, and publishable dashboard/reporting system.
+This effort is about turning the existing basement thermohygrometer CSV prototype into a physically defensible local analysis and locally viewable static dashboard/reporting system first, with automated ingestion and remote publishing deferred to a later phase.
 
 Standing preferences and constraints:
 
@@ -17,6 +17,8 @@ Standing preferences and constraints:
 - The likely analytical themes are dampness improvement, rain-correlated moisture ingress, possible constant low-rate pipe leak ingress, dehumidifier/fan/sensor intervention effects, and uncertainty propagation into reported values.
 - The user is interested in metrology, GUM-style uncertainty analysis, MetroloPy, physics explanations, publishable dashboard output on `robjhornby.com`, and blog/article-grade explanations.
 - The user wants an end-to-end prototype again soon, including local weather/outdoor humidity data, because short cycles seeing data and calculations in plots/results should guide later decisions about how deep the physical modelling needs to be.
+- Current phase: use local CSV files as the data source, run the full analysis locally, and generate static web pages locally for viewing and iteration.
+- Deferred phase: SES email routing, S3 storage, publishing to `robjhornby.com`, AWS/Cloudflare provisioning, and server-side automated ingestion/rendering. Remote-oriented decisions remain useful later architecture context, but they are not near-term implementation scope.
 - Keep early wayfinding agile: ask the user only for high-level facts that materially affect direction now, record obvious or reversible details as assumptions, and defer depth until a later research, prototype, model, or dashboard ticket makes the detail consequential.
 
 ## Decisions so far
@@ -32,12 +34,16 @@ Standing preferences and constraints:
 - [Decide Caversham weather data source and features](issues/09-decide-caversham-weather-data-source-and-features.md) — use Open-Meteo hourly coordinate weather for outdoor moisture context and Environment Agency station `270397` as the local 15-minute rainfall cross-check.
 - [Design rain and pipe leak analysis strategy](issues/10-design-rain-and-pipe-leak-analysis-strategy.md) — distinguish rain-correlated ingress from steady moisture only with intervention-aware absolute-humidity residuals, rain lag features, matched wet/dry comparisons, and cautious "compatible with" language; current data is exploratory only.
 - [Clarify email ingestion and hosting constraints](issues/11-clarify-email-ingestion-and-hosting-constraints.md) — use Gmail filtered forwarding to SES inbound in `eu-west-2`, store raw emails privately in S3, process by recoverable batch Python first, provision AWS/Cloudflare with OpenTofu, and publish static generated artifacts before any live dashboard.
+- [Evaluate DuckDB/DuckLake dashboard hosting architecture](issues/12-evaluate-duckdb-ducklake-dashboard-hosting-architecture.md) — use a local-first Python batch pipeline with private DuckDB operational state, optional local DuckLake curated history, static Quarto-first publication, and later Cloudflare-hosted artifacts before any live dashboard or remote lakehouse catalog.
+- [Define local static site audience, privacy, and core views](issues/13-define-dashboard-audience-privacy-and-core-views.md) — build the first local static site for the owner-analyst as one dense analytical page covering freshness, daily trends, raw plots, weather overlay, and cautious hypothesis evidence.
+- [Refocus roadmap on local CSV-to-static-site first](issues/21-refocus-roadmap-on-local-csv-to-static-site-first.md) — defer SES, S3, `robjhornby.com`, AWS/Cloudflare setup, and server automation until the local CSV-driven analysis produces locally viewable static web pages end to end.
+- [Establish Python project quality baseline](issues/14-establish-python-project-quality-baseline.md) — use an installable `src/basement_analysis` production package with Ruff, strict Pyright, Pytest, documented `uv` checks, and prototype-to-production migration rules.
 
 ## Fog
 
-- The exact dashboard shape is still foggy until the user confirms the key questions, first views, and which analysis outputs deserve publication. The privacy posture now allows public raw measurement plots and derived/caveated results, while keeping raw emails, CSV files, device IDs, exact address/location, and credentials private.
-- The database schema and DuckLake partitioning/storage design should wait until desired dashboard queries are clearer; do not let that block an early local weather-inclusive prototype.
+- Detailed table schema and DuckLake partitioning should wait until desired dashboard queries are clearer; do not let that block an early local weather-inclusive prototype.
 - The final physics explainer/report structure should wait until the model scope and uncertainty treatment have been chosen.
 - Blog/article topics are promising, especially basement drying physics and uncertainty propagation, but should wait until the project has one or two validated analytical results.
 - Alerting, anomaly detection, and automated leak warnings may be useful later, but the acceptable false-positive/false-negative tradeoff is not yet clear.
 - Sensor placement strategy, new sensors, or auxiliary measurements may become important after the current dataset and uncertainty budget are understood.
+- Remote ingestion, cloud storage, domain publishing, and server automation are later-phase work after the local CSV-to-static-site pipeline is useful.

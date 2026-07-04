@@ -76,3 +76,11 @@ _Avoid_: Processed folder
 **Static publication artifact**:
 Generated public files such as HTML, PNG, and JSON that can be published without a live application server.
 _Avoid_: Live dashboard, API server
+
+**Local static site**:
+Generated static web pages viewed locally during analysis iteration, before public hosting, automated ingestion, or server-side rendering exists.
+_Avoid_: Public dashboard, live site
+
+**Owner-analyst**:
+The first audience for the local static site: the homeowner analysing their own basement data and checking whether the analysis is physically defensible.
+_Avoid_: Public reader, dashboard user

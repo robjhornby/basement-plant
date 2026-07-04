@@ -1,10 +1,65 @@
 [project]
 name = "basement"
 version = "0.1.0"
-description = "Add your description here"
+description = "Local basement dampness analysis and reporting tools."
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "duckdb>=1.5.4",
     "polars>=1.42.1",
+]
+
+[project.scripts]
+basement = "basement_analysis.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.411",
+    "pytest>=9.1.1",
+    "ruff>=0.15.20",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/basement_analysis"]
+
+[tool.pytest.ini_options]
+addopts = [
+    "--strict-config",
+    "--strict-markers",
+    "-ra",
+]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.pyright]
+include = ["src", "tests", "main.py"]
+exclude = [".scratch", "data", "prototypes"]
+pythonVersion = "3.14"
+typeCheckingMode = "strict"
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+target-version = "py314"
+extend-exclude = [".scratch", "data", "prototypes"]
+
+[tool.ruff.lint]
+select = [
+    "A",
+    "ANN",
+    "B",
+    "C4",
+    "E",
+    "F",
+    "I",
+    "N",
+    "PIE",
+    "PTH",
+    "RUF",
+    "SIM",
+    "UP",
 ]

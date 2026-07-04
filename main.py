@@ -1,6 +1,6 @@
-def main():
-    print("Hello from basement!")
+from __future__ import annotations
 
+from basement_analysis.cli import main
 
 if __name__ == "__main__":
     main()
