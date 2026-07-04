@@ -17,6 +17,7 @@ Standing preferences and constraints:
 - The likely analytical themes are dampness improvement, rain-correlated moisture ingress, possible constant low-rate pipe leak ingress, dehumidifier/fan/sensor intervention effects, and uncertainty propagation into reported values.
 - The user is interested in metrology, GUM-style uncertainty analysis, MetroloPy, physics explanations, publishable dashboard output on `robjhornby.com`, and blog/article-grade explanations.
 - The user wants an end-to-end prototype again soon, including local weather/outdoor humidity data, because short cycles seeing data and calculations in plots/results should guide later decisions about how deep the physical modelling needs to be.
+- Keep early wayfinding agile: ask the user only for high-level facts that materially affect direction now, record obvious or reversible details as assumptions, and defer depth until a later research, prototype, model, or dashboard ticket makes the detail consequential.
 
 ## Decisions so far
 
@@ -24,6 +25,7 @@ Standing preferences and constraints:
 - [Profile existing sensor data and prototype assumptions](issues/02-profile-existing-sensor-data-and-prototype-assumptions.md) — the CSVs strongly support the inferred basement sensor and evening `2026-07-01` active-drying transition, but gap handling and event labels are required before trusting rebound-rate evidence.
 - [Identify sensor models and calibration evidence](issues/03-identify-sensor-models-and-calibration-evidence.md) — all three CSV-producing sensors are X-Sense `STH51` thermohygrometers connected through an `SBS50` base station; no sensor-specific calibration certificates are available, so uncertainty work must use manufacturer specs plus explicit estimates.
 - [Confirm intervention and sensor placement timeline](issues/04-confirm-intervention-and-sensor-placement-timeline.md) — `data/basement_events.csv` is now the intervention timeline; use `2026-07-01 21:00` as the physical dehumidifier event, split analysis periods at interventions, and use [Intervention, Room, And Device Context](research/04-intervention-room-and-device-context.md) for room geometry, placement, ventilation, device state, and caveats.
+- [Define dampness and leak hypotheses](issues/05-define-dampness-and-leak-hypotheses.md) — use the canonical first-pass hypothesis set, treat current data as progress toward a future `Dry baseline`, and avoid placement-sensitive inference across sensor moves unless later prototypes prove a measure robust.
 
 ## Fog
 

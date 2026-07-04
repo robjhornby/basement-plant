@@ -24,6 +24,23 @@ _Avoid_: Rain correlation
 Reduction over time in stored moisture in the basement walls, floor, air, and contents after active drying begins, separate from any additional moisture ingress.
 _Avoid_: Dampness improvement
 
+**Dry baseline**:
+Future target condition where event-bounded basement absolute humidity and relative humidity are stable near an acceptable level, rebound after dehumidifier off-cycles is low, visible floor water is absent, and damp-patch observations are not worsening.
+_Avoid_: Dry, solved, no leak
+
+**Whole-house humidity change**:
+Change in basement humidity that is best explained by broader indoor or outdoor air conditions affecting multiple rooms, rather than by basement-specific moisture storage or ingress.
+_Avoid_: House effect, background humidity
+
+**Sensor-placement artifact**:
+Apparent change in measured temperature or relative humidity caused by moving a sensor, changing nearby airflow, changing local heat exposure, or otherwise altering the sensor's microenvironment rather than the basement condition itself.
+Analysis should prefer measures that are not sensitive to sensor placement, or apply placement-sensitive measures only within time windows where the sensor was not moved. Avoid trying to infer cause and effect across sensor moves.
+_Avoid_: Sensor error, bad reading, cross-placement correction
+
+**Dehumidifier control-cycle artifact**:
+Short-term humidity and temperature pattern caused by the dehumidifier cycling, tank state, fan airflow, target-relative-humidity control, or orientation, rather than by a change in moisture ingress or stored basement moisture.
+_Avoid_: Dehumidifier effect, drying signal
+
 **Tank-full event**:
 Moment when the dehumidifier's internal tank becomes full enough that water extraction may stop or the control behaviour changes.
 _Avoid_: Tank emptied, dehumidifier off
