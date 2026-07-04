@@ -60,3 +60,19 @@ _Avoid_: Sensor, measuring device
 **Manufacturer specification**:
 Published model-level accuracy or operating information from the STH51 manual, used as evidence when sensor-specific calibration certificates are unavailable.
 _Avoid_: Calibration certificate, measured calibration
+
+**Ingest mailbox**:
+Dedicated email recipient that receives forwarded X-Sense CSV emails for automation. It is separate from the user's personal mailbox and exists to hand messages to the ingestion pipeline.
+_Avoid_: Personal inbox, Gmail account
+
+**Raw email store**:
+Private immutable storage of the full forwarded email objects before parsing, used as the audit trail and backfill source for CSV extraction.
+_Avoid_: Dashboard data, normalized sensor table
+
+**Processing state**:
+Record of which raw email objects and attachments have already been parsed, including dedupe identifiers such as S3 object key, email `Message-ID`, and attachment content hash.
+_Avoid_: Processed folder
+
+**Static publication artifact**:
+Generated public files such as HTML, PNG, and JSON that can be published without a live application server.
+_Avoid_: Live dashboard, API server
