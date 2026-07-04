@@ -22,6 +22,7 @@ Standing preferences and constraints:
 
 - [Confirm analysis goals and trust boundaries](issues/01-confirm-analysis-goals-and-trust-boundaries.md) — optimize first for a reliable local analysis library with quantitative-but-provisional measurement uncertainty, qualitative caveats, and evidence about steady-state leaking, weather-related leaking, and basement drying.
 - [Profile existing sensor data and prototype assumptions](issues/02-profile-existing-sensor-data-and-prototype-assumptions.md) — the CSVs strongly support the inferred basement sensor and evening `2026-07-01` active-drying transition, but gap handling and event labels are required before trusting rebound-rate evidence.
+- [Identify sensor models and calibration evidence](issues/03-identify-sensor-models-and-calibration-evidence.md) — all three CSV-producing sensors are X-Sense `STH51` thermohygrometers connected through an `SBS50` base station; no sensor-specific calibration certificates are available, so uncertainty work must use manufacturer specs plus explicit estimates.
 - [Confirm intervention and sensor placement timeline](issues/04-confirm-intervention-and-sensor-placement-timeline.md) — `data/basement_events.csv` is now the intervention timeline; use `2026-07-01 21:00` as the physical dehumidifier event, split analysis periods at interventions, and use [Intervention, Room, And Device Context](research/04-intervention-room-and-device-context.md) for room geometry, placement, ventilation, device state, and caveats.
 
 ## Fog
