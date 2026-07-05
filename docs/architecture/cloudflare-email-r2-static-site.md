@@ -9,7 +9,8 @@ infrastructure:
 X-Sense daily CSV email
   -> Cloudflare Email Routing / Email Worker
   -> R2 raw email object
-  -> R2 extracted CSV objects
+  -> R2 extracted CSV objects and ingest manifests
+  -> Python parser/analysis path
   -> R2 derived Parquet objects
   -> Cloudflare-hosted analysis job
   -> Cloudflare-published static site
@@ -21,7 +22,8 @@ daily export. From the ingest address onward, the durable pipeline should be Clo
 
 ## Storage Shape
 
-Use R2 as the durable store:
+Use one private R2 bucket as the first durable pipeline store. Split by prefixes rather than by
+buckets until access, retention, or publication requirements force a second bucket:
 
 - `raw-emails/`: original received `.eml` objects.
 - `csv/`: extracted CSV attachments, named by date, sensor identity, and content hash.
@@ -34,6 +36,49 @@ Use R2 as the durable store:
 Do not add a database by default. Prefer deterministic object keys, attachment content hashes, and
 manifest objects for idempotence. Add D1/Durable Objects/Queues only if a concrete coordination
 problem appears.
+
+## Ingestion Shape
+
+Use a dedicated Email Routing address on `robjhornby.com`, configured as a variable rather than
+hard-coded infrastructure state. `basement-ingest` is the default local part unless the source-email
+setup ticket chooses a better address. X-Sense can send directly to that address if its export flow
+supports it; otherwise Gmail should forward only matching X-Sense daily CSV emails to the same
+address while keeping Gmail's copy for recovery.
+
+The first ingest runtime should be a small TypeScript Email Worker deployed with Wrangler, not a
+Python analysis worker. Its job is to land immutable evidence and minimal derived ingest state:
+
+```text
+Cloudflare Email Routing rule
+  -> email-ingest Worker
+  -> raw .eml object
+  -> extracted CSV attachment objects
+  -> ingest manifest JSON object
+```
+
+The Email Worker should parse the raw MIME message with `postal-mime`, validate the current X-Sense
+shape narrowly, and avoid physical analysis or Parquet generation. Derived Parquet remains owned by
+the Python parser/analysis path so local and hosted processing stay equivalent.
+
+Recommended object keys:
+
+```text
+raw-emails/source=x-sense/received_date=YYYY-MM-DD/raw_sha256=<raw_sha256>.eml
+csv/source=x-sense/export_date=YYYY-MM-DD/attachment_sha256=<csv_sha256>/<safe_filename>.csv
+manifests/ingest/source=x-sense/received_date=YYYY-MM-DD/raw_sha256=<raw_sha256>.json
+manifests/rejections/source=x-sense/received_date=YYYY-MM-DD/raw_sha256=<raw_sha256>.json
+parquet/<existing local curated dataset layout>
+```
+
+The manifest should store the raw object key, raw SHA-256, message headers used for audit and
+dedupe (`Message-ID`, `Date`, `From`, `To`, `Subject`), attachment keys and SHA-256 values, parser
+version, validation result, and any rejection reason. R2 object custom metadata may duplicate small
+lookup fields, but the JSON manifest is the durable audit record.
+
+Use content-addressed keys and R2 conditional writes for idempotence. Duplicate raw emails and
+duplicate attachments should become no-op writes plus manifest evidence, not database rows. If a
+later hosted trigger needs coordination, prefer scanning manifests or adding a narrow queue before
+adding D1 or Durable Objects.
 
 ## Execution Shape
 
@@ -58,11 +103,16 @@ published output should be rebuildable from production code plus R2 raw/curated 
 
 ## Deployment Shape
 
-Cloudflare resources should be managed programmatically from configuration/code. OpenTofu is still
-allowed and may be the right tool for DNS, R2 buckets, Email Routing resources, Pages projects, and
-other Cloudflare account resources. Wrangler configuration may be better for Worker code, bindings,
-local dev, and deploy workflows. The project has not yet chosen the split; decide it explicitly
-before creating durable Cloudflare infrastructure.
+Cloudflare resources should use the split-control model decided during wayfinding:
+
+- OpenTofu under `infra/cloudflare/tofu/` owns durable account/zone resources such as R2 buckets,
+  DNS, Email Routing settings/rules where provider support is clean, Pages projects if needed, and
+  later durable coordination resources only when a concrete need appears.
+- Wrangler owns deployable runtime projects under `infra/cloudflare/workers/<name>/`, including
+  Worker source, compatibility dates/flags, bindings, local development, and deploys.
+- Narrow scripts under `infra/cloudflare/scripts/` are allowed for imports, smoke tests, fixture
+  uploads, Pages direct upload, and provider/API gaps. Desired state should move into OpenTofu or
+  Wrangler when possible.
 
 ## Superseded Direction
 

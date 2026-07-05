@@ -62,10 +62,10 @@ Standing preferences and constraints:
 - [Grill hosted processing stack decision](issues/34-grill-hosted-processing-stack-decision.md) — pursue Python/`uv` analysis runtime parity, plain partitioned Parquet in R2, DuckDB direct R2 reads, minimal Worker control-plane glue, and a Cloudflare Container prototype after local Parquet/DuckDB adaptation.
 - [Adapt analysis to local partitioned Parquet DuckDB path](issues/35-adapt-analysis-to-local-partitioned-parquet-duckdb.md) — local builds now curate CSV/API inputs into Hive-style Parquet object paths and render from DuckDB-read analytical records; `--reuse-curated` skips CSV/API rereads.
 - [Choose Cloudflare infrastructure-as-code approach](issues/31-choose-cloudflare-infrastructure-as-code-approach.md) — use `infra/cloudflare/tofu/` OpenTofu for durable Cloudflare resources, `infra/cloudflare/workers/<name>/` Wrangler projects for deployable runtime config and code, and narrow scripts only for imports, smoke tests, Pages uploads, and provider/API gaps.
+- [Design Cloudflare email-to-R2 ingest](issues/29-design-cloudflare-email-to-r2-ingest.md) — use a dedicated Email Routing address, a Wrangler-managed TypeScript Email Worker, one private R2 pipeline bucket, content-addressed raw/CSV object keys, and JSON manifests as the first database-free ingest state.
 
 ## Fog
 
-- Exact hosted R2 object naming, manifest shape, and final partition key details should be refined after the local Parquet/DuckDB adaptation and Cloudflare email-to-R2 design tickets.
 - Blog/article topics are promising, especially basement drying physics and uncertainty propagation, but should wait until the project has one or two validated analytical results.
 - Alerting, anomaly detection, and automated leak warnings may be useful later, but the acceptable false-positive/false-negative tradeoff is not yet clear.
 - Sensor placement strategy, new sensors, or auxiliary measurements may become important after the current dataset and uncertainty budget are understood.
