@@ -41,6 +41,9 @@ Standing preferences and constraints:
 - [Plan physics and metrology report artifact](issues/15-plan-physics-and-metrology-report-artifact.md) — make the physics/metrology report a locally generated companion explanation page linked from the dense dashboard, with visible equations, uncertainty budget, event comparability, cautious hypothesis evidence, and publication polish deferred.
 - [Prototype uncertainty-library pipeline integration](issues/16-prototype-uncertainty-library-pipeline-integration.md) — keep MetroloPy/rich uncertainty objects in pure Python analysis and report boundaries, use Polars expressions for bulk scalar columns, and avoid DuckDB Python UDFs or object columns by default.
 - [Build weather-inclusive end-to-end prototype](issues/17-build-weather-inclusive-end-to-end-prototype.md) — `uv run basement` now generates a local static dashboard from sensor CSVs, event boundaries, Open-Meteo outdoor humidity, and EA rainfall at `build/basement-site/index.html`.
+- [Design static generator dashboard/report boundary](issues/22-design-static-generator-dashboard-report-boundary.md) — use one shared `SiteAnalysisSummary` contract for dashboard and physics/metrology report generation, with calculations owned by the analysis layer and page renderers limited to presentation.
+- [Implement shared summary and report page](issues/24-implement-shared-summary-and-report-page.md) — the local static site now builds `index.html` and `physics-report.html` from one `SiteAnalysisSummary`, with focused tests around summary construction and page output.
+- [Assess local site usefulness before ingestion](issues/23-assess-local-site-usefulness-before-ingestion.md) — the regenerated local dashboard and physics/metrology report are useful enough for repeated owner-analyst feedback, so ingestion work can begin without more local-reporting blockers.
 
 ## Fog
 

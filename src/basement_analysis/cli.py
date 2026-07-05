@@ -36,6 +36,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
 
     print(f"Wrote {result.index_path}")
+    print(f"Wrote {result.report_path}")
     print(f"Sensor rows: {result.sensor_row_count:,}")
     print(f"Weather hours: {result.weather_hour_count:,}")
     print(f"Rain readings: {result.rain_reading_count:,}")

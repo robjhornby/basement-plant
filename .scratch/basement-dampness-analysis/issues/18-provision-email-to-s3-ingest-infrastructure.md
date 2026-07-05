@@ -3,7 +3,7 @@
 Type: task
 Status: open
 Parent: ../map.md
-Blocked by: 17, 19
+Blocked by: 19
 
 ## Question
 
