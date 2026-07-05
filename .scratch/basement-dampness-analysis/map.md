@@ -17,9 +17,10 @@ Standing preferences and constraints:
 - The likely analytical themes are dampness improvement, rain-correlated moisture ingress, possible constant low-rate pipe leak ingress, dehumidifier/fan/sensor intervention effects, and uncertainty propagation into reported values.
 - The user is interested in metrology, GUM-style uncertainty analysis, MetroloPy, physics explanations, publishable dashboard output on `robjhornby.com`, and blog/article-grade explanations.
 - The user wants an end-to-end prototype again soon, including local weather/outdoor humidity data, because short cycles seeing data and calculations in plots/results should guide later decisions about how deep the physical modelling needs to be.
-- Current phase: use local CSV files as the data source, run the full analysis locally, and generate static web pages locally for viewing and iteration.
-- Deferred phase: SES email routing, S3 storage, publishing to `robjhornby.com`, AWS/Cloudflare provisioning, and server-side automated ingestion/rendering. Remote-oriented decisions remain useful later architecture context, but they are not near-term implementation scope.
+- Current phase: prove the raw email ingestion path while keeping analysis, parsing, and static-site rendering local-first and batch-oriented.
+- Deferred phase: publishing to `robjhornby.com`, dashboard deployment, server-side automated rendering, alerting, and live dashboard/API hosting. Remote-oriented decisions remain useful later architecture context, but should not pull the analysis pipeline away from local reproducibility.
 - Keep early wayfinding agile: ask the user only for high-level facts that materially affect direction now, record obvious or reversible details as assumptions, and defer depth until a later research, prototype, model, or dashboard ticket makes the detail consequential.
+- Prototype tickets that clarify product direction, data assumptions, or architecture must not silently harden into downstream work. After such a prototype, add or use a short `grilling` feedback checkpoint before dependent implementation/infrastructure tickets become frontier.
 
 ## Decisions so far
 
@@ -44,6 +45,9 @@ Standing preferences and constraints:
 - [Design static generator dashboard/report boundary](issues/22-design-static-generator-dashboard-report-boundary.md) — use one shared `SiteAnalysisSummary` contract for dashboard and physics/metrology report generation, with calculations owned by the analysis layer and page renderers limited to presentation.
 - [Implement shared summary and report page](issues/24-implement-shared-summary-and-report-page.md) — the local static site now builds `index.html` and `physics-report.html` from one `SiteAnalysisSummary`, with focused tests around summary construction and page output.
 - [Assess local site usefulness before ingestion](issues/23-assess-local-site-usefulness-before-ingestion.md) — the regenerated local dashboard and physics/metrology report are useful enough for repeated owner-analyst feedback, so ingestion work can begin without more local-reporting blockers.
+- [Prototype raw email CSV processing state](issues/19-prototype-raw-email-csv-processing-state.md) — the real sample email contains three daily CSV attachments and validates local extraction plus object-key idempotence; use it as the first production parser shape.
+- [Review raw email ingestion prototype outcome](issues/25-review-raw-email-ingestion-prototype-outcome.md) — assume the real `.eml` shape is representative, match the exact current X-Sense subject/attachment pattern first, and let production reveal whether forwarded copies preserve `Message-ID`.
+- [Provision email-to-S3 ingest infrastructure](issues/18-provision-email-to-s3-ingest-infrastructure.md) — use the scratch OpenTofu package to create SES inbound receiving in `eu-west-2`, Cloudflare DNS, and private S3 raw-email landing for `basement-ingest@ingest.robjhornby.com`.
 
 ## Fog
 
@@ -51,4 +55,4 @@ Standing preferences and constraints:
 - Blog/article topics are promising, especially basement drying physics and uncertainty propagation, but should wait until the project has one or two validated analytical results.
 - Alerting, anomaly detection, and automated leak warnings may be useful later, but the acceptable false-positive/false-negative tradeoff is not yet clear.
 - Sensor placement strategy, new sensors, or auxiliary measurements may become important after the current dataset and uncertainty budget are understood.
-- Remote ingestion, cloud storage, domain publishing, and server automation are later-phase work after the local CSV-to-static-site pipeline is useful.
+- Remote static publication, dashboard deployment, and server automation remain later-phase work after the ingest path is proven with raw emails landing in private storage.
