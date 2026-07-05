@@ -13,6 +13,7 @@ from urllib.parse import urlencode
 from urllib.request import urlopen
 from zoneinfo import ZoneInfo
 
+from basement_analysis.curated_dataset import load_curated_dataset, write_curated_dataset
 from basement_analysis.summaries import (
     ChartSeries,
     ChartSpec,
@@ -43,6 +44,7 @@ SENSOR_FILE_LABELS = {
 class BuildResult:
     index_path: Path
     report_path: Path
+    curated_dataset_dir: Path
     sensor_row_count: int
     weather_hour_count: int
     rain_reading_count: int
@@ -387,8 +389,7 @@ def render_rain_svg(rain_chart: RainChartSpec) -> str:
 def render_period_table(summaries: Sequence[PeriodSummary], include_flags: bool = False) -> str:
     flags_header = "<th>Comparability flags</th>" if include_flags else ""
     rows = "\n".join(
-        render_period_row(summary, include_flags=include_flags)
-        for summary in summaries
+        render_period_row(summary, include_flags=include_flags) for summary in summaries
     )
     return f"""
     <table>
@@ -600,7 +601,7 @@ def render_index_html(summary: SiteAnalysisSummary) -> str:
   <header>
     <h1>Basement dampness local prototype</h1>
     <div class="subtle">
-      Generated {generated_at}; local CSV sensors plus Open-Meteo outdoor humidity
+      Generated {generated_at}; curated local sensors plus Open-Meteo outdoor humidity
       and Environment Agency rainfall.
     </div>
   </header>
@@ -611,7 +612,7 @@ def render_index_html(summary: SiteAnalysisSummary) -> str:
 
     <p class="note">
       Prototype scope: fast local feedback from visible calculations. Event boundaries come from
-      <code>data/basement_events.csv</code>; weather is public contextual data,
+      the curated event timeline; weather is public contextual data,
       not a house-local calibrated station. See the
       <a href="physics-report.html">physics and metrology report</a>.
     </p>
@@ -656,7 +657,7 @@ def render_uncertainty_table(summary: SiteAnalysisSummary) -> str:
           <td>{html.escape(row.component)}</td>
           <td>{html.escape(row.applies_to)}</td>
           <td>{html.escape(row.treatment)}</td>
-          <td>{'yes' if row.included_in_headline_interval else 'no'}</td>
+          <td>{"yes" if row.included_in_headline_interval else "no"}</td>
         </tr>
         """
         for row in summary.uncertainty_budget
@@ -830,36 +831,55 @@ def render_physics_report_html(summary: SiteAnalysisSummary) -> str:
 
 
 def build_static_site(
-    data_dir: Path, output_dir: Path, refresh_weather: bool = False
+    data_dir: Path,
+    output_dir: Path,
+    refresh_weather: bool = False,
+    curated_dataset_dir: Path | None = None,
+    rebuild_curated_dataset: bool = True,
 ) -> BuildResult:
-    sensor_readings = load_sensor_readings(data_dir)
-    if not sensor_readings:
-        raise ValueError(f"No sensor readings found in {data_dir}")
+    resolved_curated_dataset_dir = curated_dataset_dir or output_dir / "curated-data"
 
-    events = load_events(data_dir)
-    dataset_start = min(reading.timestamp for reading in sensor_readings)
-    dataset_end = max(reading.timestamp for reading in sensor_readings)
-    cache_dir = output_dir / "cache"
-    weather_hours = fetch_open_meteo_weather(
-        start_date=dataset_start.date(),
-        end_date=dataset_end.date(),
-        cache_dir=cache_dir,
-        refresh=refresh_weather,
-    )
-    rain_readings = fetch_environment_agency_rainfall(
-        start_date=dataset_start.date(),
-        end_date=dataset_end.date(),
-        cache_dir=cache_dir,
-        refresh=refresh_weather,
-    )
+    if rebuild_curated_dataset:
+        sensor_readings_from_csv = load_sensor_readings(data_dir)
+        if not sensor_readings_from_csv:
+            raise ValueError(f"No sensor readings found in {data_dir}")
+
+        events_from_csv = load_events(data_dir)
+        dataset_start = min(reading.timestamp for reading in sensor_readings_from_csv)
+        dataset_end = max(reading.timestamp for reading in sensor_readings_from_csv)
+        cache_dir = output_dir / "cache"
+        weather_hours_from_api = fetch_open_meteo_weather(
+            start_date=dataset_start.date(),
+            end_date=dataset_end.date(),
+            cache_dir=cache_dir,
+            refresh=refresh_weather,
+        )
+        rain_readings_from_api = fetch_environment_agency_rainfall(
+            start_date=dataset_start.date(),
+            end_date=dataset_end.date(),
+            cache_dir=cache_dir,
+            refresh=refresh_weather,
+        )
+        write_curated_dataset(
+            dataset_dir=resolved_curated_dataset_dir,
+            sensor_readings=sensor_readings_from_csv,
+            events=events_from_csv,
+            weather_hours=weather_hours_from_api,
+            rain_readings=rain_readings_from_api,
+        )
+
+    curated_dataset = load_curated_dataset(resolved_curated_dataset_dir)
+    sensor_readings = list(curated_dataset.sensor_readings)
+    if not sensor_readings:
+        raise ValueError(f"No curated sensor readings found in {resolved_curated_dataset_dir}")
 
     summary = build_site_analysis_summary(
         sensor_readings=sensor_readings,
-        events=events,
-        weather_hours=weather_hours,
-        rain_readings=rain_readings,
-        input_files=tuple(sorted(data_dir.glob("*.csv"))),
-        event_timeline_source=data_dir / "basement_events.csv",
+        events=curated_dataset.events,
+        weather_hours=curated_dataset.weather_hours,
+        rain_readings=curated_dataset.rain_readings,
+        input_files=curated_dataset.parquet_files,
+        event_timeline_source=resolved_curated_dataset_dir / "events",
     )
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -870,7 +890,8 @@ def build_static_site(
     return BuildResult(
         index_path=index_path,
         report_path=report_path,
+        curated_dataset_dir=resolved_curated_dataset_dir,
         sensor_row_count=len(sensor_readings),
-        weather_hour_count=len(weather_hours),
-        rain_reading_count=len(rain_readings),
+        weather_hour_count=len(curated_dataset.weather_hours),
+        rain_reading_count=len(curated_dataset.rain_readings),
     )

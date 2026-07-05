@@ -223,8 +223,7 @@ def build_site_analysis_summary(
                 name="Daily basement RH",
                 color="#1f766f",
                 points=tuple(
-                    (reading.timestamp, reading.relative_humidity_pct)
-                    for reading in daily_basement
+                    (reading.timestamp, reading.relative_humidity_pct) for reading in daily_basement
                 ),
             ),
             ChartSeries(
@@ -245,9 +244,7 @@ def build_site_analysis_summary(
             ChartSeries(
                 name="Basement absolute humidity",
                 color="#1f766f",
-                points=tuple(
-                    series_points(hourly_sensors, "Basement", "absolute_humidity_g_m3")
-                ),
+                points=tuple(series_points(hourly_sensors, "Basement", "absolute_humidity_g_m3")),
             ),
             ChartSeries(
                 name="Outdoor absolute humidity",
@@ -276,9 +273,7 @@ def build_site_analysis_summary(
             ChartSeries(
                 name="Living room RH",
                 color="#c2410c",
-                points=tuple(
-                    series_points(hourly_sensors, "Living room", "relative_humidity_pct")
-                ),
+                points=tuple(series_points(hourly_sensors, "Living room", "relative_humidity_pct")),
             ),
         ),
         caveat_ids=("sensor_placement_artifact",),

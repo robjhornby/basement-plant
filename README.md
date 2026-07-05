@@ -34,8 +34,20 @@ uv run basement
 ```
 
 That command builds the local static basement dashboard at
-`build/basement-site/index.html`. Use `--refresh-weather` to refetch public
-weather API data instead of using the local cache.
+`build/basement-site/index.html`. The default build derives a local partitioned
+Parquet analytical dataset at `build/basement-site/curated-data/`, then reads it
+through DuckDB before rendering the dashboard and report. Use `--refresh-weather`
+to refetch public weather API data instead of using the local cache.
+
+To rebuild the site from an existing curated dataset without rereading CSVs or
+calling weather APIs:
+
+```bash
+uv run basement --reuse-curated
+```
+
+Use `--curated-data-dir <path>` to place or read the curated Parquet dataset
+outside the generated site directory.
 
 ## Layout
 
