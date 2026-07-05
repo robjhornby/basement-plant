@@ -89,6 +89,10 @@ _Avoid_: Public dashboard, live site
 Generated static web pages published through Cloudflare infrastructure after the hosted pipeline runs. It should be reproducible from R2 raw/curated objects and the production analysis code.
 _Avoid_: Live dashboard, API server
 
+**Analysis runtime parity**:
+Requirement that hosted and local analysis run through the same Python package-management and execution model closely enough to give the owner-developer a consistent development, debugging, and deployment experience. It does not require preserving the exact current CLI command or prototype code.
+_Avoid_: Exact command parity, current code freeze
+
 **Owner-analyst**:
 The first audience for the local static site: the homeowner analysing their own basement data and checking whether the analysis is physically defensible.
 _Avoid_: Public reader, dashboard user
