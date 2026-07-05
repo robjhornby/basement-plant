@@ -61,6 +61,7 @@ Standing preferences and constraints:
 - [Research hosted processing and static generation decision tree](issues/33-research-hosted-processing-and-static-generation-decision-tree.md) — preserve the local Python/DuckDB path with Containers if fidelity wins, or keep Workers small for ingestion/state/publication if Cloudflare-native simplicity wins; decide this in the grilling checkpoint.
 - [Grill hosted processing stack decision](issues/34-grill-hosted-processing-stack-decision.md) — pursue Python/`uv` analysis runtime parity, plain partitioned Parquet in R2, DuckDB direct R2 reads, minimal Worker control-plane glue, and a Cloudflare Container prototype after local Parquet/DuckDB adaptation.
 - [Adapt analysis to local partitioned Parquet DuckDB path](issues/35-adapt-analysis-to-local-partitioned-parquet-duckdb.md) — local builds now curate CSV/API inputs into Hive-style Parquet object paths and render from DuckDB-read analytical records; `--reuse-curated` skips CSV/API rereads.
+- [Choose Cloudflare infrastructure-as-code approach](issues/31-choose-cloudflare-infrastructure-as-code-approach.md) — use `infra/cloudflare/tofu/` OpenTofu for durable Cloudflare resources, `infra/cloudflare/workers/<name>/` Wrangler projects for deployable runtime config and code, and narrow scripts only for imports, smoke tests, Pages uploads, and provider/API gaps.
 
 ## Fog
 
