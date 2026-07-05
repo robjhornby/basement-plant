@@ -21,8 +21,8 @@ The output should give the user concrete architecture/implementation options to 
 
 Prototype assets:
 
-- [Uncertainty Pipeline Integration Prototype](../prototypes/16-uncertainty-pipeline-integration.py)
-- [Uncertainty Pipeline Integration Prototype Notes](../prototypes/16-uncertainty-pipeline-integration-notes.md)
+- [Uncertainty Pipeline Integration Prototype](../../../prototypes/uncertainty-pipeline-integration/prototype.py)
+- [Uncertainty Pipeline Integration Prototype Notes](../../../prototypes/uncertainty-pipeline-integration/NOTES.md)
 
 Use a pure Python uncertainty API as the canonical integration boundary. That is where MetroloPy `gummy` objects, units, named budget components, common-mode/correlation rules, cancellation assumptions, and report formatting belong. DuckDB and Polars should not carry MetroloPy objects, Python dataclasses, or Polars `Object` columns as the default production shape.
 
@@ -33,7 +33,7 @@ DuckDB SQL macros can compute equivalent scalar results, but they duplicate form
 Verified command:
 
 ```bash
-uv run python .scratch/basement-dampness-analysis/prototypes/16-uncertainty-pipeline-integration.py
+uv run python prototypes/uncertainty-pipeline-integration/prototype.py
 ```
 
 The runnable paths matched the pure Python baseline on the sample rows:

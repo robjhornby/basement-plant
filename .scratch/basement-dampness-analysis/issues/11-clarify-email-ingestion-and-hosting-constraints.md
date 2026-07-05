@@ -4,6 +4,8 @@ Type: grilling
 Status: resolved
 Parent: ../map.md
 
+Superseded by: 27
+
 ## Question
 
 What are the practical constraints around the daily emailed CSVs, storage, automation, credentials, and publishing to `robjhornby.com`?
@@ -11,6 +13,10 @@ What are the practical constraints around the daily emailed CSVs, storage, autom
 Ask the user one question at a time about email provider, attachment naming, delivery time, whether the inbox can be accessed by IMAP/API/forwarding, acceptable hosted services, budget ceiling, privacy constraints, domain/DNS control, desired uptime, and tolerance for manual recovery.
 
 ## Answer
+
+Superseded direction as of `2026-07-05`: keep daily emailed CSVs as the source, but use
+Cloudflare Email Routing/Email Workers and R2 instead of AWS SES/S3. See
+[Adopt Cloudflare-only email/R2/static-site pipeline](27-adopt-cloudflare-only-email-r2-static-site-pipeline.md).
 
 Use a local-first, AWS-backed ingestion path:
 

@@ -62,15 +62,19 @@ Published model-level accuracy or operating information from the STH51 manual, u
 _Avoid_: Calibration certificate, measured calibration
 
 **Ingest mailbox**:
-Dedicated email recipient that receives forwarded X-Sense CSV emails for automation. It is separate from the user's personal mailbox and exists to hand messages to the ingestion pipeline.
+Dedicated Cloudflare Email Routing address that receives X-Sense CSV emails for automation, either directly from X-Sense or via a Gmail forwarding rule. It is separate from the user's personal mailbox and exists to hand messages to the ingestion pipeline.
 _Avoid_: Personal inbox, Gmail account
 
 **Raw email store**:
-Private immutable storage of the full forwarded email objects before parsing, used as the audit trail and backfill source for CSV extraction.
+Private immutable R2 storage of the full received email objects before parsing, used as the audit trail and backfill source for CSV extraction.
 _Avoid_: Dashboard data, normalized sensor table
 
+**Curated object store**:
+Private R2 storage for extracted CSV attachments and derived Parquet files. It is the analytical file lake for the hosted pipeline, not a database.
+_Avoid_: Database, live warehouse
+
 **Processing state**:
-Record of which raw email objects and attachments have already been parsed, including dedupe identifiers such as S3 object key, email `Message-ID`, and attachment content hash.
+Record of which raw email objects and attachments have already been parsed, including dedupe identifiers such as R2 object key, email `Message-ID`, and attachment content hash. Prefer deriving this from deterministic R2 keys/manifests before adding a database.
 _Avoid_: Processed folder
 
 **Static publication artifact**:
@@ -80,6 +84,10 @@ _Avoid_: Live dashboard, API server
 **Local static site**:
 Generated static web pages viewed locally during analysis iteration, before public hosting, automated ingestion, or server-side rendering exists.
 _Avoid_: Public dashboard, live site
+
+**Cloudflare static site**:
+Generated static web pages published through Cloudflare infrastructure after the hosted pipeline runs. It should be reproducible from R2 raw/curated objects and the production analysis code.
+_Avoid_: Live dashboard, API server
 
 **Owner-analyst**:
 The first audience for the local static site: the homeowner analysing their own basement data and checking whether the analysis is physically defensible.

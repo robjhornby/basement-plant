@@ -3,14 +3,14 @@
 Type: task
 Status: open
 Parent: ../map.md
-Blocked by: 18
+Blocked by: 29
 
 ## Question
 
 How should the raw-email parser/backfill command be changed so it can process raw `.eml` objects
-from a local folder or S3 prefix instead of only the checked-in prototype sample path?
+from a local folder or R2-style object prefix instead of only the checked-in prototype sample path?
 
-Use the SES/S3 object layout from [Provision email-to-S3 ingest infrastructure](18-provision-email-to-s3-ingest-infrastructure.md)
+Use the Cloudflare storage layout from [Adopt Cloudflare-only email/R2/static-site pipeline](27-adopt-cloudflare-only-email-r2-static-site-pipeline.md)
 as the remote source shape. Keep the command local-first and batch-oriented: it should be possible
-to download a landed S3 object to disk and verify parsing before wiring direct S3 listing into the
+to download a landed R2 object to disk and verify parsing before wiring direct R2 listing into the
 production parser.

@@ -42,11 +42,13 @@ weather API data instead of using the local cache.
 - `src/basement_analysis/` is the production package. New analysis, physics,
   uncertainty, ingestion, and report-generation code should start here.
 - `tests/` contains automated tests for production code.
-- `prototypes/basement_dehumidifier/` remains a throwaway evidence source. Do
-  not harden it in place; migrate validated calculations into `src/` with tests.
+- `prototypes/` contains throwaway prototypes, one prototype per subdirectory.
+  Do not harden them in place; migrate validated calculations into `src/` with tests.
+- `infra/` contains durable infrastructure definitions and notes that are expected
+  to survive beyond a single wayfinding ticket.
 - `data/` contains local sensor exports and event CSVs.
-- `.scratch/` contains local issue-tracker artifacts and is not part of the
-  production code baseline.
+- `.scratch/` contains local issue-tracker artifacts only. Do not put durable
+  implementation code or reusable infrastructure there.
 
 ## Coding Conventions
 

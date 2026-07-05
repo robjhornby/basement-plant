@@ -12,4 +12,9 @@ wheels/
 *.DS_Store
 
 data/
+
+# Prototype run artifacts
+prototypes/*/demo-output/
+prototypes/*/real-output/
+prototypes/*/*.duckdb
 output/

@@ -7,12 +7,12 @@ Question answered: what would it look like to carry first-pass measurement uncer
 One command:
 
 ```bash
-uv run python prototypes/basement_dehumidifier/uncertainty_prototype.py
+uv run python prototypes/basement-dehumidifier-uncertainty/prototype.py
 ```
 
 Output:
 
-- `prototypes/basement_dehumidifier/uncertainty_report.html`
+- `prototypes/basement-dehumidifier-uncertainty/report.html`
 
 ## Current Run
 

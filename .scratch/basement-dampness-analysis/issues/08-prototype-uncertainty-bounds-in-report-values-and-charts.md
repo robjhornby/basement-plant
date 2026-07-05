@@ -15,9 +15,9 @@ Build a low-fidelity prototype or notebook-style artifact using the current data
 
 Prototype assets:
 
-- [Uncertainty prototype script](../../../prototypes/basement_dehumidifier/uncertainty_prototype.py)
-- [Generated uncertainty report](../../../prototypes/basement_dehumidifier/uncertainty_report.html)
-- [Basement Uncertainty Prototype Notes](../../../prototypes/basement_dehumidifier/UNCERTAINTY_PROTOTYPE_NOTES.md)
+- [Uncertainty prototype script](../../../prototypes/basement-dehumidifier-uncertainty/prototype.py)
+- [Generated uncertainty report](../../../prototypes/basement-dehumidifier-uncertainty/report.html)
+- [Basement Uncertainty Prototype Notes](../../../prototypes/basement-dehumidifier-uncertainty/NOTES.md)
 
 Use approximate 95% coverage intervals in the dashboard for headline absolute-humidity values, daily mean absolute humidity, and rebound-rate points. The intervals are legible and meaningful when they are shown as secondary visual context: daily bars with error bars work well, rebound-rate points with error bars work well, and the raw/post-install absolute-humidity band is readable at 15-minute grouping but should not dominate the chart.
 
@@ -25,4 +25,4 @@ The key UX/model distinction is absolute level versus same-sensor change. Absolu
 
 Rebound-rate uncertainty is worth showing, because it prevents over-reading small cycle-to-cycle changes. In this run the latest median rebound rate is `2.41 +/- 0.10 g/m3/hr`; that supports using the metric directionally, but not as decisive leak/no-leak evidence.
 
-The prototype was verified with `uv run python prototypes/basement_dehumidifier/uncertainty_prototype.py` and a Playwright browser check of the generated HTML. No new wayfinder tickets were added; the existing dashboard, report, and uncertainty-pipeline tickets already cover the next sharp questions.
+The prototype was verified with `uv run python prototypes/basement-dehumidifier-uncertainty/prototype.py` and a Playwright browser check of the generated HTML. No new wayfinder tickets were added; the existing dashboard, report, and uncertainty-pipeline tickets already cover the next sharp questions.

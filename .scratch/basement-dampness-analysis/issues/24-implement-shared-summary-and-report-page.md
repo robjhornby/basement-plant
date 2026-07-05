@@ -9,7 +9,7 @@ Blocked by: 22
 
 How should the current local static site implementation be refactored so the dashboard and physics/metrology report are generated from one shared analysis summary contract?
 
-Use [Static Generator Dashboard/Report Boundary](../prototypes/22-static-generator-dashboard-report-boundary.md) as the target boundary. Implement the smallest production slice that extracts shared summary dataclasses/building logic from `src/basement_analysis/static_site.py`, renders the existing dashboard from that summary without changing its analytical content, and adds a first `physics-report.html` page generated from the same summary.
+Use [Static Generator Dashboard/Report Boundary](../../../prototypes/static-generator-dashboard-report-boundary/README.md) as the target boundary. Implement the smallest production slice that extracts shared summary dataclasses/building logic from `src/basement_analysis/static_site.py`, renders the existing dashboard from that summary without changing its analytical content, and adds a first `physics-report.html` page generated from the same summary.
 
 Keep the work local CSV-to-static-site only. Do not add SES, S3, Gmail forwarding, public hosting, or live dashboard infrastructure. Add focused tests for summary construction and page output so the next wayfinding ticket can assess the local site's usefulness before ingestion work begins.
 

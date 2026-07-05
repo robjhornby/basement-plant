@@ -8,7 +8,7 @@ Parent: ../map.md
 
 What does the existing local dataset actually contain, and which prototype assumptions are supported, weak, or contradicted by the CSVs?
 
-Inspect `data/*.csv`, `prototypes/basement_dehumidifier/prototype.py`, `prototypes/basement_dehumidifier/PRD.md`, `prototypes/basement_dehumidifier/NOTES.md`, and the generated report if useful. Produce a short markdown asset covering sensor count, date range, sampling cadence, missingness, column semantics, current inferred basement sensor, current inferred dehumidifier start, obvious intervention signatures, and risks in the rebound-rate heuristic.
+Inspect `data/*.csv`, `prototypes/basement-dehumidifier-report/prototype.py`, `prototypes/basement-dehumidifier-report/PRD.md`, `prototypes/basement-dehumidifier-report/NOTES.md`, and the generated report if useful. Produce a short markdown asset covering sensor count, date range, sampling cadence, missingness, column semantics, current inferred basement sensor, current inferred dehumidifier start, obvious intervention signatures, and risks in the rebound-rate heuristic.
 
 ## Answer
 

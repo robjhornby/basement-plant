@@ -16,7 +16,7 @@ should DuckDB/Polars carry plain scalar columns and reconstruct richer uncertain
 only at analysis/report boundaries?
 
 Run with:
-    uv run python .scratch/basement-dampness-analysis/prototypes/16-uncertainty-pipeline-integration.py
+    uv run python prototypes/uncertainty-pipeline-integration/prototype.py
 """
 TEMPERATURE_ACCURACY_HALFWIDTH_C = 0.4
 RELATIVE_HUMIDITY_ACCURACY_HALFWIDTH_PCT = 3.5

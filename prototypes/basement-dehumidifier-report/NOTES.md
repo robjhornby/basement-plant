@@ -7,12 +7,12 @@ Question answered: how far can the existing three thermohygrometer CSVs get towa
 One command:
 
 ```bash
-uv run python prototypes/basement_dehumidifier/prototype.py
+uv run python prototypes/basement-dehumidifier-report/prototype.py
 ```
 
 Output:
 
-- `prototypes/basement_dehumidifier/report.html`
+- `prototypes/basement-dehumidifier-report/report.html`
 
 ## Current Inference
 

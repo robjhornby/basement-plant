@@ -11,7 +11,7 @@ Does the real-email ingestion prototype match the user's actual X-Sense email wo
 enough to become the basis for production ingestion?
 
 Review [Prototype raw email CSV processing state](19-prototype-raw-email-csv-processing-state.md)
-and [Raw Email CSV Processing State Prototype Notes](../prototypes/19-raw-email-csv-processing-state-notes.md)
+and [Raw Email CSV Processing State Prototype Notes](../../../prototypes/raw-email-csv-processing-state/NOTES.md)
 with the user before any infrastructure work begins. Keep this intentionally short: the goal is not
 to redesign ingestion from scratch, but to let the user accept, reject, or redirect the prototype
 conclusions.
@@ -45,7 +45,7 @@ User direction:
 - Match the exact current subject and attachment filename pattern for now. If that breaks later,
   fix the parser then rather than overgeneralising now.
 
-Downstream implication: [Provision email-to-S3 ingest infrastructure](18-provision-email-to-s3-ingest-infrastructure.md)
-can proceed. The production parser should start strict around the observed X-Sense email shape and
-keep attachment content hashing as a backstop, but should not block infrastructure work on more
-duplicate/forwarded examples.
+Downstream implication updated by [Adopt Cloudflare-only email/R2/static-site pipeline](27-adopt-cloudflare-only-email-r2-static-site-pipeline.md):
+the production parser should start strict around the observed X-Sense email shape, keep attachment
+content hashing as a backstop, and target Cloudflare Email Routing plus R2 rather than AWS SES/S3.
+Do not block Cloudflare infrastructure work on more duplicate/forwarded examples.

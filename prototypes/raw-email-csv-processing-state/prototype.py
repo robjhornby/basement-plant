@@ -22,10 +22,10 @@ Question: what is the smallest local-first parser/backfill loop that turns raw f
 into deduplicated CSV inputs for the analysis pipeline?
 
 Default command against the checked-in real email sample:
-    uv run python .scratch/basement-dampness-analysis/prototypes/19-raw-email-csv-processing-state.py
+    uv run python prototypes/raw-email-csv-processing-state/prototype.py
 
 Folder command:
-    uv run python .scratch/basement-dampness-analysis/prototypes/19-raw-email-csv-processing-state.py \\
+    uv run python prototypes/raw-email-csv-processing-state/prototype.py \\
         --raw-email-dir scratch/raw-emails \\
         --state-db scratch/ingest-state.duckdb \\
         --extracted-dir scratch/extracted-csv
@@ -36,8 +36,8 @@ REQUIRED_SENSOR_COLUMNS = (
     "Temperature_Celsius",
     "Relative Humidity_Percent",
 )
-DEFAULT_DEMO_DIR = Path(".scratch/basement-dampness-analysis/prototypes/19-demo")
-DEFAULT_REAL_RUN_DIR = Path(".scratch/basement-dampness-analysis/prototypes/19-real")
+DEFAULT_DEMO_DIR = Path("prototypes/raw-email-csv-processing-state/demo-output")
+DEFAULT_REAL_RUN_DIR = Path("prototypes/raw-email-csv-processing-state/real-output")
 
 
 @dataclass(frozen=True)
@@ -93,7 +93,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument(
         "--object-key-prefix",
         default="local-eml",
-        help="Prefix used to model the later S3 object key namespace.",
+        help="Prefix used to model the later object-store key namespace.",
     )
     args = parser.parse_args(argv)
 

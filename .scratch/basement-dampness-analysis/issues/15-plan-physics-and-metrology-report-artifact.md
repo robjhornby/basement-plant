@@ -13,7 +13,7 @@ Create a rough outline or mock report that explains the physics behind drying ou
 
 ## Answer
 
-Prototype asset: [Physics And Metrology Report Mock](../prototypes/15-physics-and-metrology-report-mock.md)
+Prototype asset: [Physics And Metrology Report Mock](../../../prototypes/physics-and-metrology-report-mock/README.md)
 
 The physics/metrology report should be a companion explanation page linked from the dense local dashboard, not the dashboard's first screen. The dashboard remains the fast owner-analyst view; the report explains why the displayed quantities are physically meaningful, which uncertainty assumptions are included, and how to read cautious evidence about `Basement drying`, `Weather-related leaking`, `Steady-state leaking`, `Whole-house humidity change`, and `Sensor/dehumidifier artifact`.
 

@@ -1,4 +1,0 @@
-cloudflare_zone_id = "replace-with-robjhornby-com-zone-id"
-
-# Optional. S3 bucket names are globally unique; set this if the default is unavailable.
-# raw_email_bucket_name = "basement-x-sense-raw-email-123456789012"

@@ -7,38 +7,36 @@ forwarded emails into deduplicated CSV inputs for the analysis pipeline?
 
 This prototype has been rerun against the real sample email at
 `data/email/Your Temperature and Relative Humidity Data Export (Please Do Not Reply).eml`.
-Its conclusions are provisional until the feedback checkpoint decides whether this sample is
-representative and whether the dedupe assumptions match the user's real Gmail/forwarding workflow.
+Its conclusions are provisional until production ingestion proves the Cloudflare Email Routing path.
 
 One command:
 
 ```bash
-uv run python .scratch/basement-dampness-analysis/prototypes/19-raw-email-csv-processing-state.py
+uv run python prototypes/raw-email-csv-processing-state/prototype.py
 ```
 
 ## Prototype Decision To Review
 
-Use a single idempotent batch command before provisioning SES/S3 automation:
+Use a single idempotent batch command before provisioning Cloudflare-hosted automation:
 
 ```text
-raw .eml objects -> email parser -> CSV attachment validator -> DuckDB ingest state
-                 -> first-seen valid CSV attachment files -> existing analysis input path
+raw .eml objects -> email parser -> CSV attachment validator
+                 -> first-seen valid CSV attachment files -> later R2 CSV/Parquet objects
 ```
 
-The smallest useful state store is a local DuckDB file with three operational tables:
+The prototype used a local DuckDB file with three operational tables:
 
-- `raw_emails`: one row per local file or later S3 object key.
+- `raw_emails`: one row per local file or later R2 object key.
 - `email_messages`: one row per first-seen `Message-ID`.
 - `csv_attachments`: one row per CSV attachment candidate, including content hash, validation
   status, row count, and extracted path when accepted.
 
-This appears enough to support manual backfill, recoverable reruns, and later S3 listing without a
-queue, Lambda, or live service. The next step is user review before infrastructure work treats this
-as settled.
+This remains useful as a local parsing/dedupe sketch, but production should avoid introducing a
+database unless deterministic R2 keys and manifest objects prove insufficient.
 
 ## Dedupe Rules
 
-- S3/local object key is the idempotence boundary: if the same raw object is listed again, skip it.
+- R2/local object key is the idempotence boundary: if the same raw object is listed again, skip it.
 - `Message-ID` should catch duplicate forwarded emails before attachments are extracted, but this
   still needs either a real duplicate/forwarded sample or explicit confirmation of the forwarding
   path.
@@ -65,7 +63,7 @@ checks, sensor identity mapping, and event-window sanity checks.
 Command:
 
 ```bash
-uv run python .scratch/basement-dampness-analysis/prototypes/19-raw-email-csv-processing-state.py
+uv run python prototypes/raw-email-csv-processing-state/prototype.py
 ```
 
 Observed real-email first pass:
@@ -98,8 +96,8 @@ csv_attachments:
 ## User Feedback Needed
 
 - Is this sample representative: one daily email containing all three sensor CSV attachments?
-- Are forwarded Gmail copies expected to preserve the original `Message-ID`, or should the parser
-  assume forwarded copies may receive a new `Message-ID`?
+- Are forwarded copies expected to preserve the original `Message-ID`, or should the parser assume
+  forwarded copies may receive a new `Message-ID`?
 - Do you want production ingestion to accept only this exact subject/attachment pattern, or should
   it stay tolerant of occasional filename and subject changes?
 
@@ -109,7 +107,7 @@ csv_attachments:
    assumptions.
 2. Keep the first command manually runnable with local paths:
    `uv run basement ingest-emails --raw-email-dir ... --state-db ... --extracted-dir ...`.
-3. Use the same state model for S3 by replacing local file discovery with an S3 object listing and
+3. Reuse the parser shape for R2 by replacing local file discovery with R2 object listing and
    preserving object keys as the raw-email identity.
 4. Keep extracted raw CSV files private and treat the generated static site as the publication
    boundary.

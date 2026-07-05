@@ -5,6 +5,8 @@ Status: resolved
 Parent: ../map.md
 Blocked by: 11
 
+Superseded by: 27
+
 ## Question
 
 What simple, cheap architecture should turn S3-stored raw emails and local CSV backfills into DuckDB or DuckLake-backed analysis outputs and static publication artifacts on `robjhornby.com`?
@@ -14,6 +16,11 @@ Research options that fit the user's learning goal around DuckDB/DuckLake while 
 Compare the remaining choices: storage format, DuckDB versus DuckLake role, local/server scheduler, static dashboard/report generation tool, static hosting target, secrets handling, processing-state storage, backup/recovery strategy, and what would be overkill but educational versus necessary.
 
 ## Answer
+
+Superseded direction as of `2026-07-05`: do not make DuckDB/DuckLake or AWS S3 the required hosted
+state layer. The current direction is Cloudflare Email/R2, derived Parquet in R2, no database by
+default, and a feasibility prototype for Python DuckDB on Cloudflare Workers. See
+[Adopt Cloudflare-only email/R2/static-site pipeline](27-adopt-cloudflare-only-email-r2-static-site-pipeline.md).
 
 Use a local-first batch architecture:
 

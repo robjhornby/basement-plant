@@ -9,7 +9,7 @@ columns while reconstructing rich uncertainty objects only at analysis/report bo
 One command:
 
 ```bash
-uv run python .scratch/basement-dampness-analysis/prototypes/16-uncertainty-pipeline-integration.py
+uv run python prototypes/uncertainty-pipeline-integration/prototype.py
 ```
 
 ## What The Prototype Compares
@@ -46,7 +46,7 @@ reason about.
 Command:
 
 ```bash
-uv run python .scratch/basement-dampness-analysis/prototypes/16-uncertainty-pipeline-integration.py
+uv run python prototypes/uncertainty-pipeline-integration/prototype.py
 ```
 
 Observed on the sample readings:

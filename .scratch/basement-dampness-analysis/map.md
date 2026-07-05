@@ -4,21 +4,25 @@ Label: wayfinder:map
 
 ## Notes
 
-This effort is about turning the existing basement thermohygrometer CSV prototype into a physically defensible local analysis and locally viewable static dashboard/reporting system first, with automated ingestion and remote publishing deferred to a later phase.
+This effort is about turning daily emailed X-Sense thermohygrometer CSVs into a physically defensible basement dampness analysis and static dashboard/reporting system. The local CSV-to-static-site path remains the reproducible debug baseline; the hosted path should run on Cloudflare infrastructure.
 
 Standing preferences and constraints:
 
-- Treat `prototypes/basement_dehumidifier/PRD.md` and `prototypes/basement_dehumidifier/NOTES.md` as low-trust prototype artifacts. They are useful evidence of what has been tried, not settled requirements.
+- Treat `prototypes/basement-dehumidifier-report/PRD.md` and `prototypes/basement-dehumidifier-report/NOTES.md` as low-trust prototype artifacts. They are useful evidence of what has been tried, not settled requirements.
+- Keep prototypes under top-level `prototypes/<prototype-name>/`, one prototype per subdirectory. `.scratch` is only the local issue tracker and research artifact area.
 - Confirm user-facing claims before hardening them. The user explicitly wants most product, physics, calibration, uncertainty, ingestion, and dashboard assumptions clarified or confirmed.
 - Use `/grilling` and `/domain-modeling` whenever a ticket needs user confirmation or sharper terminology.
-- Use research tickets for external sources such as X-Sense sensor specifications, calibration/certification evidence, ISO/GUM/MetroloPy material, weather data APIs, DuckDB/DuckLake hosting, and dashboard deployment options.
+- Use research tickets for external sources such as X-Sense sensor specifications, calibration/certification evidence, ISO/GUM/MetroloPy material, weather data APIs, Cloudflare Email Routing, R2, Workers/Python Workers, DuckDB-on-Workers feasibility, and dashboard deployment options.
 - Existing local data is in `data/*.csv`; the current prototype infers basement sensor, dehumidifier start, absolute humidity, and dehumidifier cycles heuristically.
 - For Python implementation, prefer type hints everywhere, full-name `snake_case` variables, modern Python practices, focused modules, Ruff linting/formatting, and tests around analysis behavior.
 - The likely analytical themes are dampness improvement, rain-correlated moisture ingress, possible constant low-rate pipe leak ingress, dehumidifier/fan/sensor intervention effects, and uncertainty propagation into reported values.
 - The user is interested in metrology, GUM-style uncertainty analysis, MetroloPy, physics explanations, publishable dashboard output on `robjhornby.com`, and blog/article-grade explanations.
 - The user wants an end-to-end prototype again soon, including local weather/outdoor humidity data, because short cycles seeing data and calculations in plots/results should guide later decisions about how deep the physical modelling needs to be.
-- Current phase: prove the raw email ingestion path while keeping analysis, parsing, and static-site rendering local-first and batch-oriented.
-- Deferred phase: publishing to `robjhornby.com`, dashboard deployment, server-side automated rendering, alerting, and live dashboard/API hosting. Remote-oriented decisions remain useful later architecture context, but should not pull the analysis pipeline away from local reproducibility.
+- Current phase: prove the Cloudflare email-to-R2 hosted path while keeping local parsing, analysis, and static-site rendering reproducible.
+- Hosted target: Cloudflare Email Routing / Email Worker receives daily X-Sense CSV emails, R2 stores raw `.eml`, extracted CSV, and derived Parquet objects, Cloudflare-hosted automation runs the analysis/static-site generator, and Cloudflare publishes the generated static site.
+- Do not add a database by default. Prefer deterministic R2 object keys, content hashes, and small manifest objects unless a concrete coordination problem requires D1, Durable Objects, Queues, or another state service.
+- The desired Python + DuckDB-on-Cloudflare execution model is unproven and must be prototyped before downstream implementation depends on it.
+- Superseded: AWS SES, AWS S3, DuckLake, and AWS-centered OpenTofu resources for this project.
 - Keep early wayfinding agile: ask the user only for high-level facts that materially affect direction now, record obvious or reversible details as assumptions, and defer depth until a later research, prototype, model, or dashboard ticket makes the detail consequential.
 - Prototype tickets that clarify product direction, data assumptions, or architecture must not silently harden into downstream work. After such a prototype, add or use a short `grilling` feedback checkpoint before dependent implementation/infrastructure tickets become frontier.
 
@@ -34,10 +38,10 @@ Standing preferences and constraints:
 - [Prototype uncertainty bounds in report values and charts](issues/08-prototype-uncertainty-bounds-in-report-values-and-charts.md) — show approximate 95% coverage intervals for headline absolute humidity, daily means, and rebound rates; same-sensor changes can be much tighter than absolute levels only when the cancellation assumption is explicit.
 - [Decide Caversham weather data source and features](issues/09-decide-caversham-weather-data-source-and-features.md) — use Open-Meteo hourly coordinate weather for outdoor moisture context and Environment Agency station `270397` as the local 15-minute rainfall cross-check.
 - [Design rain and pipe leak analysis strategy](issues/10-design-rain-and-pipe-leak-analysis-strategy.md) — distinguish rain-correlated ingress from steady moisture only with intervention-aware absolute-humidity residuals, rain lag features, matched wet/dry comparisons, and cautious "compatible with" language; current data is exploratory only.
-- [Clarify email ingestion and hosting constraints](issues/11-clarify-email-ingestion-and-hosting-constraints.md) — use Gmail filtered forwarding to SES inbound in `eu-west-2`, store raw emails privately in S3, process by recoverable batch Python first, provision AWS/Cloudflare with OpenTofu, and publish static generated artifacts before any live dashboard.
-- [Evaluate DuckDB/DuckLake dashboard hosting architecture](issues/12-evaluate-duckdb-ducklake-dashboard-hosting-architecture.md) — use a local-first Python batch pipeline with private DuckDB operational state, optional local DuckLake curated history, static Quarto-first publication, and later Cloudflare-hosted artifacts before any live dashboard or remote lakehouse catalog.
+- [Clarify email ingestion and hosting constraints](issues/11-clarify-email-ingestion-and-hosting-constraints.md) — historical decision that selected Gmail-to-SES/S3; superseded by [Adopt Cloudflare-only email/R2/static-site pipeline](issues/27-adopt-cloudflare-only-email-r2-static-site-pipeline.md).
+- [Evaluate DuckDB/DuckLake dashboard hosting architecture](issues/12-evaluate-duckdb-ducklake-dashboard-hosting-architecture.md) — historical DuckDB/DuckLake hosting analysis; superseded where it assumes AWS S3, DuckLake, or a database as required hosted state.
 - [Define local static site audience, privacy, and core views](issues/13-define-dashboard-audience-privacy-and-core-views.md) — build the first local static site for the owner-analyst as one dense analytical page covering freshness, daily trends, raw plots, weather overlay, and cautious hypothesis evidence.
-- [Refocus roadmap on local CSV-to-static-site first](issues/21-refocus-roadmap-on-local-csv-to-static-site-first.md) — defer SES, S3, `robjhornby.com`, AWS/Cloudflare setup, and server automation until the local CSV-driven analysis produces locally viewable static web pages end to end.
+- [Refocus roadmap on local CSV-to-static-site first](issues/21-refocus-roadmap-on-local-csv-to-static-site-first.md) — local CSV-to-static-site work produced the reproducible baseline; hosted ingestion/publication can now proceed without abandoning local reruns.
 - [Establish Python project quality baseline](issues/14-establish-python-project-quality-baseline.md) — use an installable `src/basement_analysis` production package with Ruff, strict Pyright, Pytest, documented `uv` checks, and prototype-to-production migration rules.
 - [Plan physics and metrology report artifact](issues/15-plan-physics-and-metrology-report-artifact.md) — make the physics/metrology report a locally generated companion explanation page linked from the dense dashboard, with visible equations, uncertainty budget, event comparability, cautious hypothesis evidence, and publication polish deferred.
 - [Prototype uncertainty-library pipeline integration](issues/16-prototype-uncertainty-library-pipeline-integration.md) — keep MetroloPy/rich uncertainty objects in pure Python analysis and report boundaries, use Polars expressions for bulk scalar columns, and avoid DuckDB Python UDFs or object columns by default.
@@ -45,14 +49,15 @@ Standing preferences and constraints:
 - [Design static generator dashboard/report boundary](issues/22-design-static-generator-dashboard-report-boundary.md) — use one shared `SiteAnalysisSummary` contract for dashboard and physics/metrology report generation, with calculations owned by the analysis layer and page renderers limited to presentation.
 - [Implement shared summary and report page](issues/24-implement-shared-summary-and-report-page.md) — the local static site now builds `index.html` and `physics-report.html` from one `SiteAnalysisSummary`, with focused tests around summary construction and page output.
 - [Assess local site usefulness before ingestion](issues/23-assess-local-site-usefulness-before-ingestion.md) — the regenerated local dashboard and physics/metrology report are useful enough for repeated owner-analyst feedback, so ingestion work can begin without more local-reporting blockers.
-- [Prototype raw email CSV processing state](issues/19-prototype-raw-email-csv-processing-state.md) — the real sample email contains three daily CSV attachments and validates local extraction plus object-key idempotence; use it as the first production parser shape.
+- [Prototype raw email CSV processing state](issues/19-prototype-raw-email-csv-processing-state.md) — the real sample email contains three daily CSV attachments and validates local extraction plus object-key idempotence; reuse the parser lessons, but avoid a database unless R2 keys/manifests are insufficient.
 - [Review raw email ingestion prototype outcome](issues/25-review-raw-email-ingestion-prototype-outcome.md) — assume the real `.eml` shape is representative, match the exact current X-Sense subject/attachment pattern first, and let production reveal whether forwarded copies preserve `Message-ID`.
-- [Provision email-to-S3 ingest infrastructure](issues/18-provision-email-to-s3-ingest-infrastructure.md) — use the scratch OpenTofu package to create SES inbound receiving in `eu-west-2`, Cloudflare DNS, and private S3 raw-email landing for `basement-ingest@ingest.robjhornby.com`.
+- [Provision email-to-S3 ingest infrastructure](issues/18-provision-email-to-s3-ingest-infrastructure.md) — superseded; the scratch AWS SES/S3 OpenTofu artifact was removed and should not be promoted.
+- [Adopt Cloudflare-only email/R2/static-site pipeline](issues/27-adopt-cloudflare-only-email-r2-static-site-pipeline.md) — keep daily emailed CSVs as the source, but receive, store, process, and publish through Cloudflare Email Routing/Workers, R2, Parquet, and Cloudflare static hosting.
 
 ## Fog
 
-- Detailed table schema and DuckLake partitioning should wait until desired dashboard queries are clearer; do not let that block an early local weather-inclusive prototype.
+- Exact R2 object naming, manifest shape, and CSV-to-Parquet partitioning should be decided after the Cloudflare email-to-R2 design ticket.
 - Blog/article topics are promising, especially basement drying physics and uncertainty propagation, but should wait until the project has one or two validated analytical results.
 - Alerting, anomaly detection, and automated leak warnings may be useful later, but the acceptable false-positive/false-negative tradeoff is not yet clear.
 - Sensor placement strategy, new sensors, or auxiliary measurements may become important after the current dataset and uncertainty budget are understood.
-- Remote static publication, dashboard deployment, and server automation remain later-phase work after the ingest path is proven with raw emails landing in private storage.
+- Alert delivery, anomaly notifications, and more advanced workflow orchestration should wait until the Cloudflare email/R2/static-site loop works end to end.

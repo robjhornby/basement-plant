@@ -9,10 +9,10 @@ What does the existing local dataset actually contain, and which prototype assum
 - `data/Thermo-hygrometer_Export Data_202601031200_202607031200.csv`
 - `data/Thermo-hygrometer 2_Export Data_202601031200_202607031200.csv`
 - `data/Thermo-hygrometer 3_Export Data_202601031200_202607031200.csv`
-- `prototypes/basement_dehumidifier/prototype.py`
-- `prototypes/basement_dehumidifier/PRD.md`
-- `prototypes/basement_dehumidifier/NOTES.md`
-- `prototypes/basement_dehumidifier/report.html`
+- `prototypes/basement-dehumidifier-report/prototype.py`
+- `prototypes/basement-dehumidifier-report/PRD.md`
+- `prototypes/basement-dehumidifier-report/NOTES.md`
+- `prototypes/basement-dehumidifier-report/report.html`
 
 ## Dataset profile
 
