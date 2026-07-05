@@ -20,9 +20,11 @@ Standing preferences and constraints:
 - The user wants an end-to-end prototype again soon, including local weather/outdoor humidity data, because short cycles seeing data and calculations in plots/results should guide later decisions about how deep the physical modelling needs to be.
 - Current phase: prove the Cloudflare email-to-R2 hosted path while keeping local parsing, analysis, and static-site rendering reproducible.
 - Hosted target: Cloudflare Email Routing / Email Worker receives daily X-Sense CSV emails, R2 stores raw `.eml`, extracted CSV, and derived Parquet objects, Cloudflare-hosted automation runs the analysis/static-site generator, and Cloudflare publishes the generated static site.
+- Deployment target: keep Cloudflare setup programmatic and configuration/code based. OpenTofu is allowed for Cloudflare resources; choose the right split between OpenTofu, Wrangler, and any scripts before creating durable Cloudflare infra.
 - Do not add a database by default. Prefer deterministic R2 object keys, content hashes, and small manifest objects unless a concrete coordination problem requires D1, Durable Objects, Queues, or another state service.
-- The desired Python + DuckDB-on-Cloudflare execution model is unproven and must be prototyped before downstream implementation depends on it.
-- Superseded: AWS SES, AWS S3, DuckLake, and AWS-centered OpenTofu resources for this project.
+- Python Worker plus DuckDB is not viable for hosted analysis with current Pyodide/Emscripten package support; verify a Cloudflare Container fallback before downstream implementation depends on hosted analysis compute.
+- Before choosing Cloudflare deployment mechanics or hosted analysis compute, research the broader processing/static-generation decision tree and run a grilling checkpoint with the user.
+- Superseded: AWS SES, AWS S3, DuckLake, and AWS-centered resources for this project. OpenTofu itself is not superseded for Cloudflare resources.
 - Keep early wayfinding agile: ask the user only for high-level facts that materially affect direction now, record obvious or reversible details as assumptions, and defer depth until a later research, prototype, model, or dashboard ticket makes the detail consequential.
 - Prototype tickets that clarify product direction, data assumptions, or architecture must not silently harden into downstream work. After such a prototype, add or use a short `grilling` feedback checkpoint before dependent implementation/infrastructure tickets become frontier.
 
@@ -53,6 +55,7 @@ Standing preferences and constraints:
 - [Review raw email ingestion prototype outcome](issues/25-review-raw-email-ingestion-prototype-outcome.md) — assume the real `.eml` shape is representative, match the exact current X-Sense subject/attachment pattern first, and let production reveal whether forwarded copies preserve `Message-ID`.
 - [Provision email-to-S3 ingest infrastructure](issues/18-provision-email-to-s3-ingest-infrastructure.md) — superseded; the scratch AWS SES/S3 OpenTofu artifact was removed and should not be promoted.
 - [Adopt Cloudflare-only email/R2/static-site pipeline](issues/27-adopt-cloudflare-only-email-r2-static-site-pipeline.md) — keep daily emailed CSVs as the source, but receive, store, process, and publish through Cloudflare Email Routing/Workers, R2, Parquet, and Cloudflare static hosting.
+- [Verify Python DuckDB on Cloudflare Workers](issues/28-verify-python-duckdb-on-cloudflare-workers.md) — Python DuckDB is not viable in Cloudflare Python Workers today; the next Cloudflare-only analysis-compute fallback to verify is a Cloudflare Container running normal Python plus DuckDB.
 
 ## Fog
 
@@ -61,3 +64,4 @@ Standing preferences and constraints:
 - Alerting, anomaly detection, and automated leak warnings may be useful later, but the acceptable false-positive/false-negative tradeoff is not yet clear.
 - Sensor placement strategy, new sensors, or auxiliary measurements may become important after the current dataset and uncertainty budget are understood.
 - Alert delivery, anomaly notifications, and more advanced workflow orchestration should wait until the Cloudflare email/R2/static-site loop works end to end.
+- If the hosted stack decision tree rejects Cloudflare Containers, revisit whether derived Parquet is still the right curated format or whether CSV/JSON/static artifacts are enough for the hosted path.

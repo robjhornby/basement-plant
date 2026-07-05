@@ -37,28 +37,37 @@ problem appears.
 
 ## Execution Shape
 
-The desired execution model is a Cloudflare-hosted Python analysis job that uses DuckDB to query
-Parquet files from R2, feeds the existing `basement_analysis` analysis/static-site code, and
-publishes updated static output.
+The hosted analysis job should remain Cloudflare-owned, but it should not be implemented as a
+Python Worker importing `duckdb`. The Python Worker prototype failed during Cloudflare's
+Pyodide/Emscripten dependency resolution because no usable DuckDB wheel was available for the
+Worker target.
 
-This is not yet proven. Cloudflare supports Python Workers, Email Workers, R2 bindings, and
-scheduled Workers, but the exact viability of Python DuckDB inside Cloudflare Workers needs a
-prototype because Python Workers run on Pyodide/Wasm and package support/performance limits may
-matter. If Python DuckDB is not viable directly, the fallback should still remain Cloudflare-only:
+Next, verify a Cloudflare Container fallback: a Worker/Durable Object controls a container image
+that runs normal Python plus DuckDB, reads Parquet from R2, feeds the existing `basement_analysis`
+analysis/static-site code, and publishes updated static output. This keeps the hosted path on
+Cloudflare while avoiding Python Worker package and isolate limits.
 
-- use a JavaScript/TypeScript Worker with a DuckDB-Wasm package that supports Workers; or
-- split the flow so Workers handle email/R2 conversion and another Cloudflare-supported compute
-  surface runs the heavier analysis.
+DuckDB-Wasm in a JavaScript/TypeScript Worker is a secondary fallback only if a Worker-specific
+build proves simple enough. Do not assume the official browser-oriented DuckDB-Wasm package can run
+the hosted analysis step in Workers without a separate prototype.
 
 ## Publication Shape
 
 Publish static artifacts through Cloudflare Pages or another Cloudflare static asset path. The
 published output should be rebuildable from production code plus R2 raw/curated objects.
 
+## Deployment Shape
+
+Cloudflare resources should be managed programmatically from configuration/code. OpenTofu is still
+allowed and may be the right tool for DNS, R2 buckets, Email Routing resources, Pages projects, and
+other Cloudflare account resources. Wrangler configuration may be better for Worker code, bindings,
+local dev, and deploy workflows. The project has not yet chosen the split; decide it explicitly
+before creating durable Cloudflare infrastructure.
+
 ## Superseded Direction
 
 The previous AWS SES plus S3 plan is superseded. Keep its issue history as design context, but do
-not promote that OpenTofu package or create AWS resources for this effort.
+not create AWS resources for this effort. This does not rule out OpenTofu for Cloudflare resources.
 
 ## References
 
@@ -67,3 +76,4 @@ not promote that OpenTofu package or create AWS resources for this effort.
 - Cloudflare Python package support: https://developers.cloudflare.com/workers/languages/python/packages/
 - Cloudflare R2 Workers API: https://developers.cloudflare.com/r2/api/workers/workers-api-reference/
 - Cloudflare R2 uploads from Workers: https://developers.cloudflare.com/r2/objects/upload-objects/
+- Cloudflare Containers: https://developers.cloudflare.com/containers/

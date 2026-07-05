@@ -34,3 +34,8 @@ Durable architecture note:
 Project-structure decision: durable Cloudflare infrastructure belongs under `infra/cloudflare/`,
 not `.scratch/`; throwaway prototypes belong under top-level `prototypes/<prototype-name>/`, one
 prototype per subdirectory.
+
+Deployment decision: the hosted system should still be programmatic and configuration/code based.
+OpenTofu is not ruled out; the project should explicitly choose the best Cloudflare deployment
+mechanism, likely some combination of OpenTofu for account resources and Wrangler for Worker code
+and bindings.

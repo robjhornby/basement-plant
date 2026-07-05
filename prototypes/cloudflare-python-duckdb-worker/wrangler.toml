@@ -1,0 +1,11 @@
+name = "basement-python-duckdb-prototype"
+main = "src/entry.py"
+compatibility_date = "2026-07-05"
+compatibility_flags = ["python_workers"]
+
+[limits]
+cpu_ms = 300_000
+
+[[r2_buckets]]
+binding = "BASEMENT_BUCKET"
+bucket_name = "basement-python-duckdb-prototype"

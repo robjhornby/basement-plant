@@ -1,0 +1,12 @@
+[project]
+name = "cloudflare-python-duckdb-worker-prototype"
+version = "0.1.0"
+description = "Throwaway prototype checking whether Python DuckDB can run in Cloudflare Workers."
+requires-python = ">=3.13"
+dependencies = [
+    "duckdb>=1.5.4",
+    "workers-py>=0.0.9",
+]
+
+[dependency-groups]
+dev = []

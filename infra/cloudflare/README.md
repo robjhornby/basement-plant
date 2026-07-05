@@ -7,6 +7,9 @@ The target hosted path is documented in
 
 Expected future contents:
 
+- OpenTofu, Wrangler, or another explicit config/code based deployment path for Cloudflare
+  resources. The tool choice is intentionally undecided until the wayfinder ticket for Cloudflare
+  infrastructure-as-code is resolved.
 - Cloudflare Email Routing / Email Worker configuration for the ingest address.
 - R2 bucket definitions and bindings.
 - Worker or Workflow code that stores raw emails, extracts CSV attachments, writes Parquet, and
@@ -14,4 +17,4 @@ Expected future contents:
 - Cloudflare Pages or static asset publication configuration.
 
 Do not add AWS SES/S3 resources for this project unless the Cloudflare-only direction is explicitly
-reversed.
+reversed. OpenTofu remains acceptable for Cloudflare resources if it proves to be the right fit.
