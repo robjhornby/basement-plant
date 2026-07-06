@@ -63,6 +63,10 @@ Deployment facts:
 - Set GitHub Actions secret `R2_SITE_BUCKET=basement-site` in `robjhornby/basement-plant`.
 - Pushed commit `742285a` (`Publish basement site via R2 Worker`) to `main`; dispatched GitHub
   Actions run `28831151415` completed successfully in 43 s using the new Wrangler publish path.
+- After the R2 token was expanded to include `basement-site`, removed the GitHub
+  `CLOUDFLARE_API_TOKEN` secret and pushed commit `41a0799` (`Use R2 scoped token for site
+  publication`). Dispatched GitHub Actions run `28831272985` completed successfully in 17 s using
+  only the R2 S3-compatible credentials for publication.
 - Live smoke tests passed: `https://basement.robjhornby.com/` and
   `https://basement.robjhornby.com/physics-report.html` return `200` with the expected page
   content; `HEAD` returns `200`; non-GET/HEAD methods return `405`.
