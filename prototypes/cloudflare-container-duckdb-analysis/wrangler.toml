@@ -1,0 +1,21 @@
+name = "basement-analysis-container-prototype"
+main = "worker/src/index.ts"
+compatibility_date = "2026-07-01"
+
+[observability]
+enabled = true
+
+[[containers]]
+class_name = "AnalysisContainer"
+image = "./Dockerfile"
+instance_type = "basic"
+max_instances = 1
+
+[[durable_objects.bindings]]
+name = "ANALYSIS_CONTAINER"
+class_name = "AnalysisContainer"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["AnalysisContainer"]
+

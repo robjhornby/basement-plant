@@ -49,6 +49,22 @@ uv run basement --reuse-curated
 Use `--curated-data-dir <path>` to place or read the curated Parquet dataset
 outside the generated site directory.
 
+To parse downloaded raw X-Sense `.eml` files into the Cloudflare/R2 object-key
+layout locally:
+
+```bash
+uv run basement ingest-emails \
+  --raw-email-dir data/email \
+  --object-store-dir build/basement-ingest-objects
+```
+
+The command scans for `.eml` files recursively, copies raw messages under
+`raw-emails/source=x-sense/`, extracts first-seen valid CSV attachments under
+`csv/source=x-sense/`, and writes ingest manifests under `manifests/ingest/`.
+If you download objects from R2 with their key structure already present under
+the input directory, pass `--raw-object-key-prefix ""` to preserve those local
+relative paths as object keys.
+
 ## Layout
 
 - `src/basement_analysis/` is the production package. New analysis, physics,

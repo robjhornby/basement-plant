@@ -1,7 +1,7 @@
 # Prototype Cloudflare Container DuckDB analysis job
 
 Type: prototype
-Status: open
+Status: claimed
 Parent: ../map.md
 Blocked by: 31
 
