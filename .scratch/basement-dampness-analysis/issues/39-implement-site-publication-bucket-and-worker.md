@@ -63,6 +63,8 @@ Deployment facts:
   `basement-site` using `wrangler r2 object put`.
 - Set GitHub Actions secrets `R2_SITE_BUCKET=basement-site` and `CLOUDFLARE_API_TOKEN` in
   `robjhornby/basement-plant`.
+- Pushed commit `742285a` (`Publish basement site via R2 Worker`) to `main`; dispatched GitHub
+  Actions run `28831151415` completed successfully in 43 s using the new Wrangler publish path.
 - Live smoke tests passed: `https://basement.robjhornby.com/` and
   `https://basement.robjhornby.com/physics-report.html` return `200` with the expected page
   content; `HEAD` returns `200`; non-GET/HEAD methods return `405`.
