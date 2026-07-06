@@ -4,6 +4,7 @@ import argparse
 from collections.abc import Sequence
 from pathlib import Path
 
+from basement_analysis.curated_dataset import parse_curated_data_location
 from basement_analysis.raw_email_ingest import print_ingest_results, process_raw_email_batch
 from basement_analysis.static_site import build_static_site
 
@@ -40,11 +41,13 @@ def build_site(argv: Sequence[str] | None = None) -> None:
     )
     parser.add_argument(
         "--curated-data-dir",
-        type=Path,
+        type=parse_curated_data_location,
         default=None,
         help=(
-            "Directory for the local partitioned Parquet analytical dataset. Defaults to "
-            "<output-dir>/curated-data."
+            "Location of the partitioned Parquet analytical dataset: a local directory or an "
+            "s3:// URL read directly via DuckDB (R2 credentials from R2_ENDPOINT_URL, "
+            "R2_ACCESS_KEY_ID, and R2_SECRET_ACCESS_KEY; s3:// requires --reuse-curated). "
+            "Defaults to <output-dir>/curated-data."
         ),
     )
     parser.add_argument(

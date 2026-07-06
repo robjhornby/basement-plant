@@ -14,13 +14,9 @@ permissions:
   contents: read
 
 env:
-  AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-  AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-  AWS_DEFAULT_REGION: auto
-  # R2 predates the aws-cli default CRC32 request checksums; only send them when required.
-  AWS_REQUEST_CHECKSUM_CALCULATION: when_required
-  AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
   R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
+  R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+  R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
   R2_BUCKET: ${{ secrets.R2_BUCKET }}
 
 jobs:
@@ -34,18 +30,20 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Sync curated Parquet from R2
-        run: >
-          aws s3 sync "s3://$R2_BUCKET/parquet" build/gha-site/curated-data
-          --endpoint-url "$R2_ENDPOINT_URL" --no-progress
-
-      - name: Build static site from curated Parquet
+      - name: Build static site from curated Parquet in R2
         run: >
           uv run basement --reuse-curated
           --output-dir build/gha-site/site
-          --curated-data-dir build/gha-site/curated-data
+          --curated-data-dir "s3://$R2_BUCKET/parquet"
 
       - name: Publish site HTML to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          # R2 predates the aws-cli default CRC32 request checksums; only send them when required.
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
         run: >
           aws s3 sync build/gha-site/site "s3://$R2_BUCKET/site/basement-site"
           --exclude '*' --include '*.html'

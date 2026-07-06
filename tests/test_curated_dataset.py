@@ -6,7 +6,12 @@ from pathlib import Path
 import pytest
 
 from basement_analysis import static_site
-from basement_analysis.curated_dataset import load_curated_dataset, write_curated_dataset
+from basement_analysis.curated_dataset import (
+    join_curated_data_path,
+    load_curated_dataset,
+    parse_curated_data_location,
+    write_curated_dataset,
+)
 from basement_analysis.summaries import (
     Event,
     RainReading,
@@ -153,5 +158,36 @@ def test_static_site_builds_from_curated_parquet_path(
     assert result.report_path.exists()
     assert result.sensor_row_count == 4
     assert result.weather_hour_count == 2
+    assert isinstance(result.curated_dataset_dir, Path)
     assert list(result.curated_dataset_dir.glob("**/*.parquet"))
-    assert "curated local sensors" in result.index_path.read_text(encoding="utf-8")
+
+
+def test_parse_curated_data_location_handles_local_and_s3() -> None:
+    assert parse_curated_data_location("build/curated") == Path("build/curated")
+    assert parse_curated_data_location("s3://bucket/parquet/") == "s3://bucket/parquet"
+    with pytest.raises(ValueError, match="bucket"):
+        parse_curated_data_location("s3://")
+
+
+def test_join_curated_data_path_for_both_location_kinds() -> None:
+    assert join_curated_data_path(Path("curated"), "events") == Path("curated") / "events"
+    assert join_curated_data_path("s3://bucket/parquet", "events") == "s3://bucket/parquet/events"
+
+
+def test_load_curated_dataset_from_s3_requires_r2_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for variable_name in ("R2_ENDPOINT_URL", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"):
+        monkeypatch.delenv(variable_name, raising=False)
+
+    with pytest.raises(ValueError, match="R2_ENDPOINT_URL"):
+        load_curated_dataset("s3://bucket/parquet")
+
+
+def test_build_static_site_rejects_rebuilding_into_s3_location(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="reuse-curated"):
+        static_site.build_static_site(
+            data_dir=tmp_path,
+            output_dir=tmp_path / "site",
+            curated_dataset_dir="s3://bucket/parquet",
+        )

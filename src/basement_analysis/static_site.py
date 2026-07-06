@@ -13,7 +13,12 @@ from urllib.parse import urlencode
 from urllib.request import urlopen
 from zoneinfo import ZoneInfo
 
-from basement_analysis.curated_dataset import load_curated_dataset, write_curated_dataset
+from basement_analysis.curated_dataset import (
+    CuratedDataRoot,
+    join_curated_data_path,
+    load_curated_dataset,
+    write_curated_dataset,
+)
 from basement_analysis.summaries import (
     ChartSeries,
     ChartSpec,
@@ -44,7 +49,7 @@ SENSOR_FILE_LABELS = {
 class BuildResult:
     index_path: Path
     report_path: Path
-    curated_dataset_dir: Path
+    curated_dataset_dir: CuratedDataRoot
     sensor_row_count: int
     weather_hour_count: int
     rain_reading_count: int
@@ -859,12 +864,19 @@ def build_static_site(
     data_dir: Path,
     output_dir: Path,
     refresh_weather: bool = False,
-    curated_dataset_dir: Path | None = None,
+    curated_dataset_dir: CuratedDataRoot | None = None,
     rebuild_curated_dataset: bool = True,
 ) -> BuildResult:
-    resolved_curated_dataset_dir = curated_dataset_dir or output_dir / "curated-data"
+    resolved_curated_dataset_dir = (
+        curated_dataset_dir if curated_dataset_dir is not None else output_dir / "curated-data"
+    )
 
     if rebuild_curated_dataset:
+        if isinstance(resolved_curated_dataset_dir, str):
+            raise ValueError(
+                "Rebuilding the curated dataset needs a local --curated-data-dir; "
+                "an s3:// location can only be read with --reuse-curated."
+            )
         sensor_readings_from_csv = load_sensor_readings(data_dir)
         if not sensor_readings_from_csv:
             raise ValueError(f"No sensor readings found in {data_dir}")
@@ -904,7 +916,7 @@ def build_static_site(
         weather_hours=curated_dataset.weather_hours,
         rain_readings=curated_dataset.rain_readings,
         input_files=curated_dataset.parquet_files,
-        event_timeline_source=resolved_curated_dataset_dir / "events",
+        event_timeline_source=join_curated_data_path(resolved_curated_dataset_dir, "events"),
     )
 
     written_paths = write_site_pages(render_site_pages(summary), output_dir)

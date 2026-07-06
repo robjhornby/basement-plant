@@ -62,3 +62,26 @@ observed run duration).
   repo (name/visibility — note the whole history including `data/*.csv` home sensor data and
   `.scratch/` notes gets pushed) before `git push`, `gh secret set`, first dispatch, and green
   verification.
+
+### 2026-07-07 — DuckDB now reads Parquet straight from R2; user chose a public repo
+
+- The user rejected the sync-down copy as an antipattern, so `basement --curated-data-dir` now
+  accepts an `s3://bucket/prefix` location and DuckDB reads the partitioned Parquet directly
+  from R2 (httpfs, `s3_endpoint`/keys from `R2_ENDPOINT_URL`, `R2_ACCESS_KEY_ID`,
+  `R2_SECRET_ACCESS_KEY`; `s3_url_style=path`, region `auto`). An s3:// location requires
+  `--reuse-curated`; rebuilding curated data still needs a local directory and fails with a
+  clear message otherwise.
+- Ruff, strict Pyright, and all 13 tests pass (new tests cover location parsing, path joining,
+  the missing-credentials error, and the s3-rebuild guard). Real end-to-end run:
+  `uv run basement --reuse-curated --curated-data-dir s3://basement-pipeline/parquet` renders
+  byte-identical HTML to the synced-copy build except the generated-at timestamp.
+- `.github/workflows/basement-site.yml` no longer syncs Parquet down; the build step passes the
+  s3:// location and the R2_* env vars. `aws s3 sync` remains only for publishing the rendered
+  HTML to `site/basement-site/`.
+- Repo decision: **public** under `robjhornby`, `.scratch/` stays in for now (GH issues later).
+  Pre-publication audit: no `.envrc`/tfstate/tfvars/`.eml`/`data/` ever committed, no secrets or
+  account IDs in tracked files, email fixtures synthetic. Conscious disclosures going public:
+  home-area coordinates `51.47, -0.97` in `static_site.py` and `.scratch` research notes, the
+  `basement-ingest@robjhornby.com` address in tickets, and commit author identity.
+- GitHub note for later: scheduled workflows on public repos are auto-disabled after 60 days
+  without repo activity; the daily commit-free cron needs occasional activity or a re-enable.

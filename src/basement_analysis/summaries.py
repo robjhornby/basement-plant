@@ -95,10 +95,10 @@ class SiteMetadata:
     data_window_start: datetime
     data_window_end: datetime
     analysis_version: str
-    input_files: tuple[Path, ...]
+    input_files: tuple[Path | str, ...]
     sensor_models: tuple[str, ...]
     weather_sources: tuple[str, ...]
-    event_timeline_source: Path | None
+    event_timeline_source: Path | str | None
 
 
 @dataclass(frozen=True)
@@ -187,8 +187,8 @@ def build_site_analysis_summary(
     events: Sequence[Event],
     weather_hours: Sequence[WeatherHour],
     rain_readings: Sequence[RainReading],
-    input_files: Sequence[Path] = (),
-    event_timeline_source: Path | None = None,
+    input_files: Sequence[Path | str] = (),
+    event_timeline_source: Path | str | None = None,
     generated_at: datetime | None = None,
 ) -> SiteAnalysisSummary:
     if not sensor_readings:
