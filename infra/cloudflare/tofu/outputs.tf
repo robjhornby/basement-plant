@@ -3,6 +3,16 @@ output "pipeline_bucket_name" {
   value       = cloudflare_r2_bucket.pipeline.name
 }
 
+output "site_bucket_name" {
+  description = "R2 bucket the site Worker binds to and the analysis runner publishes HTML into."
+  value       = cloudflare_r2_bucket.site.name
+}
+
+output "site_worker_hostname" {
+  description = "Hostname served by the Wrangler-managed site Worker route."
+  value       = "${cloudflare_dns_record.site_worker_subdomain.name}.${var.zone_name}"
+}
+
 output "ingest_email_address" {
   description = "Address X-Sense (or the Gmail forwarding rule) should send daily exports to."
   value       = local.ingest_email_address

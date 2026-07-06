@@ -1,0 +1,23 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "basement-site",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-01",
+  "routes": [
+    {
+      "pattern": "basement.robjhornby.com/*",
+      "zone_name": "robjhornby.com"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "SITE_BUCKET",
+      // Must match the OpenTofu site_bucket_name variable
+      // (infra/cloudflare/tofu/variables.tf).
+      "bucket_name": "basement-site"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

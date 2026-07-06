@@ -20,8 +20,14 @@ variable "pipeline_bucket_name" {
   default     = "basement-pipeline"
 }
 
+variable "site_bucket_name" {
+  description = "Name of the private R2 bucket holding generated static site HTML."
+  type        = string
+  default     = "basement-site"
+}
+
 variable "r2_location" {
-  description = "R2 location hint for the pipeline bucket."
+  description = "R2 location hint for project buckets."
   type        = string
   default     = "WEUR"
 }
@@ -36,6 +42,12 @@ variable "email_ingest_worker_name" {
   description = "Deployed name of the email-ingest Worker (must match wrangler.jsonc name)."
   type        = string
   default     = "basement-email-ingest"
+}
+
+variable "site_worker_subdomain" {
+  description = "Subdomain used for the public basement site Worker route."
+  type        = string
+  default     = "basement"
 }
 
 variable "create_email_ingest_rule" {

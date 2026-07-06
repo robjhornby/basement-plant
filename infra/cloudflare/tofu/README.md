@@ -1,9 +1,9 @@
 # OpenTofu: durable Cloudflare resources
 
 Owns the durable resources for the basement pipeline: the private `basement-pipeline` R2 bucket,
-zone Email Routing enablement/DNS, and the routing rule that sends the ingest address to the
-`basement-email-ingest` Worker. Worker code/config is owned by Wrangler under
-`../workers/email-ingest/`.
+the private `basement-site` publication bucket, and the routing rule that sends the ingest address
+to the `basement-email-ingest` Worker. Worker code/config is owned by Wrangler under
+`../workers/email-ingest/` and `../workers/site/`.
 
 ```bash
 export CLOUDFLARE_API_TOKEN=...   # R2 Write, Zone DNS Write, Zone Email Routing Write
@@ -19,6 +19,11 @@ Apply ordering: the Email Routing rule (`create_email_ingest_rule`) is gated off
 because the provider's rule action references the Worker by name and the Worker must already be
 deployed. Order is: `tofu apply` -> `wrangler deploy` (in `../workers/email-ingest/`) ->
 `tofu apply -var=create_email_ingest_rule=true`.
+
+The site bucket and proxied `basement.robjhornby.com` DNS record can be created in the first
+`tofu apply`. Deploy the site Worker from `../workers/site/` after that bucket exists, then set
+the GitHub Actions secrets `R2_SITE_BUCKET=basement-site` and `CLOUDFLARE_API_TOKEN` for Wrangler
+uploads. The existing R2 S3 credentials only need to read `basement-pipeline` for DuckDB.
 
 ## Provider support gaps and manual steps
 

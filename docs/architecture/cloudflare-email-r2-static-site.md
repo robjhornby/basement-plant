@@ -2,8 +2,8 @@
 
 ## Current Direction
 
-Run the hosted ingestion, storage, analysis, and publication path exclusively on Cloudflare
-infrastructure:
+Run the hosted ingestion, storage, and publication path on Cloudflare infrastructure, with
+GitHub Actions providing the free-plan Python analysis runner:
 
 ```text
 X-Sense daily CSV email
@@ -12,8 +12,9 @@ X-Sense daily CSV email
   -> R2 extracted CSV objects and ingest manifests
   -> Python parser/analysis path
   -> R2 derived Parquet objects
-  -> Cloudflare-hosted analysis job
-  -> Cloudflare-published static site
+  -> GitHub Actions Python/uv analysis job
+  -> R2 generated static site objects
+  -> Cloudflare Worker route
 ```
 
 The email source remains central. The ingest address may receive mail directly from X-Sense if that
@@ -22,16 +23,21 @@ daily export. From the ingest address onward, the durable pipeline should be Clo
 
 ## Storage Shape
 
-Use one private R2 bucket as the first durable pipeline store. Split by prefixes rather than by
-buckets until access, retention, or publication requirements force a second bucket:
+Use a private pipeline R2 bucket for ingest and analytical data:
 
 - `raw-emails/`: original received `.eml` objects.
 - `csv/`: extracted CSV attachments, named by date, sensor identity, and content hash.
 - `parquet/`: derived Parquet files used by analysis.
-- `site/`: generated static publication artifacts, if direct Pages upload is not the selected
-  deployment mechanism.
 - `manifests/`: small JSON manifests for idempotence and audit state if deterministic object keys
   are not enough.
+
+Use a separate private site R2 bucket for publication:
+
+- `index.html`: generated dashboard.
+- `physics-report.html`: generated physics/metrology report.
+
+The separation is deliberate blast-radius reduction: the public-facing Worker binds only to the
+site bucket, so a routing bug cannot expose raw email, CSV, manifest, or Parquet objects.
 
 Do not add a database by default. Prefer deterministic object keys, attachment content hashes, and
 manifest objects for idempotence. Add D1/Durable Objects/Queues only if a concrete coordination
@@ -82,32 +88,34 @@ adding D1 or Durable Objects.
 
 ## Execution Shape
 
-The hosted analysis job should remain Cloudflare-owned, but it should not be implemented as a
-Python Worker importing `duckdb`. The Python Worker prototype failed during Cloudflare's
-Pyodide/Emscripten dependency resolution because no usable DuckDB wheel was available for the
-Worker target.
+The hosted analysis job is a GitHub Actions workflow in the public
+`robjhornby/basement-plant` repository. It runs `uv run basement --reuse-curated` with DuckDB
+reading `s3://basement-pipeline/parquet` directly through R2's S3-compatible endpoint, then writes
+the rendered `index.html` and `physics-report.html` files to the dedicated `basement-site` bucket
+with Wrangler. The R2 S3-compatible credentials stay scoped to the pipeline read path.
 
-Next, verify a Cloudflare Container fallback: a Worker/Durable Object controls a container image
-that runs normal Python plus DuckDB, reads Parquet from R2, feeds the existing `basement_analysis`
-analysis/static-site code, and publishes updated static output. This keeps the hosted path on
-Cloudflare while avoiding Python Worker package and isolate limits.
-
-DuckDB-Wasm in a JavaScript/TypeScript Worker is a secondary fallback only if a Worker-specific
-build proves simple enough. Do not assume the official browser-oriented DuckDB-Wasm package can run
-the hosted analysis step in Workers without a separate prototype.
+This replaces the rejected Cloudflare Container path: Containers require the Workers Paid plan,
+and free Workers cannot host the Python/DuckDB analysis workload.
 
 ## Publication Shape
 
-Publish static artifacts through Cloudflare Pages or another Cloudflare static asset path. The
-published output should be rebuildable from production code plus R2 raw/curated objects.
+Publish static artifacts as R2 objects behind a small GET-only Worker route. The Worker binds to
+the `basement-site` bucket on `basement.robjhornby.com` and serves only:
+
+- `/` and `/index.html` -> `index.html`
+- `/physics-report.html` -> `physics-report.html`
+
+Pages and Workers static assets are intentionally not used because they couple daily content
+publishes to a Wrangler/Node code deploy. The Worker code deploy is rare; daily publication is just
+R2 object writes by the analysis runner.
 
 ## Deployment Shape
 
 Cloudflare resources should use the split-control model decided during wayfinding:
 
 - OpenTofu under `infra/cloudflare/tofu/` owns durable account/zone resources such as R2 buckets,
-  DNS, Email Routing settings/rules where provider support is clean, Pages projects if needed, and
-  later durable coordination resources only when a concrete need appears.
+  DNS, Email Routing rules where provider support is clean, and later durable coordination
+  resources only when a concrete need appears.
 - Wrangler owns deployable runtime projects under `infra/cloudflare/workers/<name>/`, including
   Worker source, compatibility dates/flags, bindings, local development, and deploys.
 - Narrow scripts under `infra/cloudflare/scripts/` are allowed for imports, smoke tests, fixture
