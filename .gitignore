@@ -24,3 +24,4 @@ output/
 node_modules/
 prototypes/*/.wrangler/
 prototypes/*/curated-data-snapshot/
+.wrangler/
