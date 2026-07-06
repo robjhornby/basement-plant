@@ -92,7 +92,7 @@ The hosted analysis job is a GitHub Actions workflow in the public
 `robjhornby/basement-plant` repository. It runs `uv run basement --reuse-curated` with DuckDB
 reading `s3://basement-pipeline/parquet` directly through R2's S3-compatible endpoint, then writes
 the rendered `index.html` and `physics-report.html` files to the dedicated `basement-site` bucket
-with Wrangler. The R2 S3-compatible credentials stay scoped to the pipeline read path.
+using R2 S3-compatible credentials scoped to the pipeline and site buckets.
 
 This replaces the rejected Cloudflare Container path: Containers require the Workers Paid plan,
 and free Workers cannot host the Python/DuckDB analysis workload.

@@ -22,8 +22,8 @@ deployed. Order is: `tofu apply` -> `wrangler deploy` (in `../workers/email-inge
 
 The site bucket and proxied `basement.robjhornby.com` DNS record can be created in the first
 `tofu apply`. Deploy the site Worker from `../workers/site/` after that bucket exists, then set
-the GitHub Actions secrets `R2_SITE_BUCKET=basement-site` and `CLOUDFLARE_API_TOKEN` for Wrangler
-uploads. The existing R2 S3 credentials only need to read `basement-pipeline` for DuckDB.
+the GitHub Actions secret `R2_SITE_BUCKET=basement-site`. The R2 S3 credentials used by the
+workflow need object read/write scope for `basement-pipeline` and `basement-site`.
 
 ## Provider support gaps and manual steps
 

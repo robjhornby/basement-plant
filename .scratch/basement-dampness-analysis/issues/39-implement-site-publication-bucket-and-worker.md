@@ -35,18 +35,17 @@ GitHub Actions rather than a Cloudflare Container:
   `/` and `/index.html` -> `index.html`; `/physics-report.html` -> `physics-report.html`.
   Unknown paths return `404`; non-GET requests return `405`.
 - Updated `.github/workflows/basement-site.yml` so the analysis runner still reads curated Parquet
-  from `s3://$R2_BUCKET/parquet`, but publishes rendered HTML to `$R2_SITE_BUCKET` with Wrangler
-  rather than the interim `s3://$R2_BUCKET/site/basement-site` prefix.
+  from `s3://$R2_BUCKET/parquet`, but publishes rendered HTML to `s3://$R2_SITE_BUCKET` rather
+  than the interim `s3://$R2_BUCKET/site/basement-site` prefix.
 - Updated Cloudflare docs under `infra/cloudflare/` and
   `docs/architecture/cloudflare-email-r2-static-site.md` to record the split bucket/publication
   shape and the GitHub Actions runner replacing the Container path.
 
 Operational facts later tickets depend on:
 
-- New GitHub Actions secrets required: `R2_SITE_BUCKET=basement-site` and `CLOUDFLARE_API_TOKEN`
-  for Wrangler R2 object uploads.
-- The workflow's existing R2 S3 credentials only need to read `basement-pipeline`; the current
-  key is intentionally not widened to write the public site bucket.
+- New GitHub Actions secret required: `R2_SITE_BUCKET=basement-site`.
+- The workflow's existing R2 S3 credentials need object read/write scope for `basement-pipeline`
+  and `basement-site`.
 - Apply/deploy order: `tofu apply` to create the site bucket and DNS record, then
   `npm install && npm run types && npm run deploy` from `infra/cloudflare/workers/site/`.
 - Verification passed: `uv run ruff check`, `uv run pyright`, `uv run pytest`,
@@ -61,8 +60,7 @@ Deployment facts:
   HEAD-support fix is `763a4097-1071-4eb5-ae55-f3dd1ba5a84c`.
 - Uploaded the current local `build/basement-site/index.html` and `physics-report.html` into
   `basement-site` using `wrangler r2 object put`.
-- Set GitHub Actions secrets `R2_SITE_BUCKET=basement-site` and `CLOUDFLARE_API_TOKEN` in
-  `robjhornby/basement-plant`.
+- Set GitHub Actions secret `R2_SITE_BUCKET=basement-site` in `robjhornby/basement-plant`.
 - Pushed commit `742285a` (`Publish basement site via R2 Worker`) to `main`; dispatched GitHub
   Actions run `28831151415` completed successfully in 43 s using the new Wrangler publish path.
 - Live smoke tests passed: `https://basement.robjhornby.com/` and
