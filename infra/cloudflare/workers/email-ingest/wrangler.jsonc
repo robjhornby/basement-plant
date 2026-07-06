@@ -1,0 +1,17 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "basement-email-ingest",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-01",
+  "r2_buckets": [
+    {
+      "binding": "PIPELINE_BUCKET",
+      // Must match the OpenTofu pipeline_bucket_name variable
+      // (infra/cloudflare/tofu/variables.tf).
+      "bucket_name": "basement-pipeline"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

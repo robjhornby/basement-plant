@@ -12,9 +12,15 @@ wheels/
 *.DS_Store
 
 data/
+.envrc
 
 # Prototype run artifacts
 prototypes/*/demo-output/
 prototypes/*/real-output/
 prototypes/*/*.duckdb
 output/
+
+# Cloudflare prototype local state
+node_modules/
+prototypes/*/.wrangler/
+prototypes/*/curated-data-snapshot/

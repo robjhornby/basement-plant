@@ -1,0 +1,11 @@
+{
+  "name": "basement-analysis-container-prototype",
+  "private": true,
+  "devDependencies": {
+    "wrangler": "^4.107.0",
+    "typescript": "^5.9.0"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "^0.0.28"
+  }
+}

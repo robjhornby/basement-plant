@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 
-from basement_analysis.static_site import render_index_html, render_physics_report_html
+from basement_analysis.static_site import (
+    render_index_html,
+    render_physics_report_html,
+    render_site_pages,
+    write_site_pages,
+)
 from basement_analysis.summaries import (
     Event,
     RainReading,
@@ -126,3 +132,33 @@ def test_dashboard_and_report_render_from_shared_summary() -> None:
     assert "Uncertainty Budget" in report_html
     assert "Comparability flags" in report_html
     assert "Compatible with active basement drying" in report_html
+
+
+def test_render_site_pages_returns_relative_path_to_html_mapping() -> None:
+    summary = build_site_analysis_summary(
+        sensor_readings=[
+            sensor_reading("2026-06-28T15:00:00", "Basement", 18.0, 88.0),
+            sensor_reading("2026-07-02T22:00:00", "Basement", 19.0, 72.0),
+        ],
+        events=[Event(datetime.fromisoformat("2026-06-28T16:20:00"), "Bare floor exposed")],
+        weather_hours=[weather_hour("2026-07-02T22:00:00", 17.0, 68.0)],
+        rain_readings=[RainReading(datetime.fromisoformat("2026-07-02T22:10:00"), 0.4)],
+        generated_at=datetime.fromisoformat("2026-07-05T12:00:00"),
+    )
+
+    pages = render_site_pages(summary)
+
+    assert set(pages) == {"index.html", "physics-report.html"}
+    assert pages["index.html"] == render_index_html(summary)
+    assert pages["physics-report.html"] == render_physics_report_html(summary)
+
+
+def test_write_site_pages_persists_mapping_under_output_dir(tmp_path: Path) -> None:
+    pages = {"index.html": "<p>dashboard</p>", "nested/report.html": "<p>report</p>"}
+
+    written_paths = write_site_pages(pages, tmp_path / "site")
+
+    assert written_paths["index.html"] == tmp_path / "site" / "index.html"
+    assert written_paths["nested/report.html"] == tmp_path / "site" / "nested" / "report.html"
+    for relative_path, content in pages.items():
+        assert written_paths[relative_path].read_text(encoding="utf-8") == content

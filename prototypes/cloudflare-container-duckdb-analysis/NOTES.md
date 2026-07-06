@@ -80,8 +80,36 @@ The local run generated:
 - `build/site-output/site/prototypes/container-analysis/index.html`
 - `build/site-output/site/prototypes/container-analysis/manifest.json`
 
-The Docker daemon was not running in this session, so image build, cold start, memory/disk limits
-inside a real container, and `wrangler dev`/Cloudflare deployment remain unproven.
+## Smoke test results (2026-07-06, ticket 37)
+
+Everything provable without Cloudflare account credentials passed:
+
+- `docker build`: ~14 s, 277 MB image (arm64 native build).
+- Containerized batch run against the curated Parquet mount: identical summary to the local `uv`
+  run (571,021 sensor rows), completing in under 1 s.
+- HTTP trigger mode in the container: `POST /run` answered in ~160 ms; the serving container
+  idles at ~92 MiB RSS, well inside the `basic` instance type and probably inside `lite`.
+- `npx wrangler dev` Worker-to-Container routing: cold `POST /run` completed the full analysis in
+  2.4 s (including container start), warm calls in ~50 ms.
+
+Platform gotcha: `wrangler dev` builds the container image for `linux/amd64` (the Cloudflare
+deploy platform). On Apple Silicon with plain QEMU emulation the Python 3.14 process segfaults at
+startup ("Container crashed while checking for ports"). Enabling Docker Desktop's *Use Rosetta for
+x86/amd64 emulation* setting fixes it; the amd64 image then runs the full DuckDB analysis
+correctly under emulation.
+
+To support a credential-free deployed smoke test, the Dockerfile now bakes a snapshot of the
+curated Parquet dataset (`curated-data-snapshot/`, ~2.3 MB copied from
+`../../build/basement-site/curated-data`) into the image at `/data/curated`, which is also the
+default `--parquet-root` in serve mode. Drop that `COPY` line before promoting the image shape to
+durable infrastructure; production reads come from R2.
+
+Still unproven (needs `wrangler login`, Workers Paid, and R2 credentials — see ticket 37 comments):
+
+- Direct DuckDB reads from real R2 partitioned Parquet via the S3-compatible endpoint.
+- Site-artifact writes back to an R2 prefix.
+- One deployed Cloudflare Container run on the `basic` instance type, with startup time, logs,
+  and cost-control observations.
 
 ## Provisional verdict
 

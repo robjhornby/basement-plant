@@ -1,0 +1,21 @@
+{
+  "name": "basement-email-ingest",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev"
+  },
+  "dependencies": {
+    "postal-mime": "^2.4.3"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.8.19",
+    "@cloudflare/workers-types": "^4.20250620.0",
+    "typescript": "^5.5.0",
+    "vitest": "~3.2.0",
+    "wrangler": "^4.20.0"
+  }
+}

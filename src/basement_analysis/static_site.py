@@ -4,7 +4,7 @@ import csv
 import html
 import json
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -830,6 +830,31 @@ def render_physics_report_html(summary: SiteAnalysisSummary) -> str:
 """
 
 
+def render_site_pages(summary: SiteAnalysisSummary) -> dict[str, str]:
+    """Render every published site page to a relative object path -> HTML string mapping.
+
+    This is the render/write seam: callers that need the bytes without a filesystem
+    destination (for example a hosted job uploading straight to R2) can call this function
+    directly and skip `write_site_pages` entirely.
+    """
+    return {
+        "index.html": render_index_html(summary),
+        "physics-report.html": render_physics_report_html(summary),
+    }
+
+
+def write_site_pages(pages: Mapping[str, str], output_dir: Path) -> dict[str, Path]:
+    """Persist a rendered-page mapping under `output_dir`, keyed by relative object path."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    written_paths: dict[str, Path] = {}
+    for relative_path, page_content in pages.items():
+        destination_path = output_dir / relative_path
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        destination_path.write_text(page_content, encoding="utf-8")
+        written_paths[relative_path] = destination_path
+    return written_paths
+
+
 def build_static_site(
     data_dir: Path,
     output_dir: Path,
@@ -882,14 +907,10 @@ def build_static_site(
         event_timeline_source=resolved_curated_dataset_dir / "events",
     )
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-    index_path = output_dir / "index.html"
-    report_path = output_dir / "physics-report.html"
-    index_path.write_text(render_index_html(summary), encoding="utf-8")
-    report_path.write_text(render_physics_report_html(summary), encoding="utf-8")
+    written_paths = write_site_pages(render_site_pages(summary), output_dir)
     return BuildResult(
-        index_path=index_path,
-        report_path=report_path,
+        index_path=written_paths["index.html"],
+        report_path=written_paths["physics-report.html"],
         curated_dataset_dir=resolved_curated_dataset_dir,
         sensor_row_count=len(sensor_readings),
         weather_hour_count=len(curated_dataset.weather_hours),
