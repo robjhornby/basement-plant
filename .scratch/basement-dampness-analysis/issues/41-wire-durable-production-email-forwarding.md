@@ -1,9 +1,14 @@
 # Wire durable production forwarding of the daily X-Sense email to the ingest address
 
 Type: task
-Status: open
+Status: resolved
 Parent: ../map.md
 Blocked by:
+
+Duplicate: folded into
+[Configure source email delivery to Cloudflare ingest](20-configure-source-email-delivery-to-cloudflare-ingest.md),
+which asks the same question and is where the decision is recorded. The exact-subject/attachment
+constraints and candidate approaches below were copied into that ticket's working context.
 
 ## Question
 

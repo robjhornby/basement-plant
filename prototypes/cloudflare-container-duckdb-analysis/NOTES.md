@@ -128,3 +128,14 @@ Before creating durable Container infrastructure, run the same prototype with:
 If the deployed smoke test fails on R2 access, startup time, image size, logs, or cost controls,
 fall back to keeping heavy generation in an external normal-Python runner while Workers continue
 to own ingestion and R2 state.
+
+## Final outcome (2026-07-06, ticket 37)
+
+The deployed smoke test never ran: `wrangler deploy` builds the image, then 401s on
+`GET /accounts/{account_id}/containers/me` — Containers require the Workers Paid plan and the
+account stays on Free by choice. Containers turned out to be the only paid-plan requirement in
+the whole pipeline, so the fallback was chosen: hosted analysis compute moves to a GitHub
+Actions runner executing this same `uv` job against R2 (wayfinding ticket 42). Nothing was
+deployed, so nothing needed tearing down. This prototype is closed; it stands as the record of
+how far the Container path was proven (everything up to account enrollment) if paid Cloudflare
+compute is ever revisited.
