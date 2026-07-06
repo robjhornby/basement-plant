@@ -1,7 +1,7 @@
 # Implement GitHub Actions analysis runner
 
 Type: task
-Status: claimed
+Status: resolved
 Parent: ../map.md
 Blocked by: 37
 
@@ -85,3 +85,38 @@ observed run duration).
   `basement-ingest@robjhornby.com` address in tickets, and commit author identity.
 - GitHub note for later: scheduled workflows on public repos are auto-disabled after 60 days
   without repo activity; the daily commit-free cron needs occasional activity or a re-enable.
+
+## Answer
+
+**The hosted analysis runner is live and green.** The repo is public at
+<https://github.com/robjhornby/basement-plant> (named for treating the basement as the plant in
+a control system); `.github/workflows/basement-site.yml` runs daily at 06:30 UTC and on manual
+dispatch. The first dispatched run
+([run 28830121811](https://github.com/robjhornby/basement-plant/actions/runs/28830121811))
+succeeded in **29 seconds** end to end: `uv run basement --reuse-curated --curated-data-dir
+s3://basement-pipeline/parquet` had DuckDB read all 571,021 sensor rows directly from R2 on the
+runner (no Parquet copying — the sync-down step was rejected as an antipattern and removed),
+and `aws s3 sync` published `index.html` + `physics-report.html` to
+`s3://basement-pipeline/site/basement-site/`. The regenerated page was read back from R2 to
+confirm the publish.
+
+Facts later tickets depend on:
+
+- Repo: `robjhornby/basement-plant`, public, default branch `main`. Public repos get free
+  Actions minutes, so the ~30 s daily run costs nothing.
+- Secrets (repo-level): `R2_ENDPOINT_URL`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`,
+  `R2_BUCKET` — same names as the local gitignored `.envrc`.
+- Interim site prefix: `site/basement-site/` in `basement-pipeline`; move to the dedicated site
+  bucket under [Implement site publication bucket and Worker](39-implement-site-publication-bucket-and-worker.md)
+  (the R2 token's bucket scope must then be extended or a second token added).
+- Before publication, precise home coordinates were rounded to 2 dp (`51.47, -0.97`) across the
+  working tree **and full git history** (`git filter-repo --replace-text` with context-anchored
+  rules so the coincidental byte match inside `docs/reference/aretetwo-20l25l-manual-uk-150724.pdf`
+  stayed untouched — blob hash verified identical). A pre-rewrite backup bundle exists in the
+  session scratchpad.
+- Deferred: `repository_dispatch` from the email-ingest Worker (daily cron suffices);
+  minor deprecation annotation — bump `actions/checkout@v4`/`astral-sh/setup-uv@v5` majors
+  sometime; GitHub auto-disables public-repo cron after 60 days of repo inactivity.
+- Follow-on graduated to [Curate ingested email CSVs into R2 Parquet](43-curate-ingested-email-csvs-into-r2-parquet.md):
+  scheduled runs currently rebuild from the once-uploaded Parquet snapshot; new email CSVs never
+  reach `parquet/`, so the published site does not yet track new data.
