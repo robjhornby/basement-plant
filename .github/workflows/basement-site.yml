@@ -12,6 +12,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: write
 
 env:
   R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
@@ -25,11 +26,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
         with:
           enable-cache: true
+
+      # GitHub auto-disables scheduled workflows in public repos after 60 days
+      # without repo activity. Re-enabling on every run resets that timer so
+      # the daily cron keeps firing even if nothing else touches the repo.
+      - name: Keep scheduled workflow enabled
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/basement-site.yml/enable"
 
       - name: Download accepted ingest manifests and CSVs from R2
         env:
