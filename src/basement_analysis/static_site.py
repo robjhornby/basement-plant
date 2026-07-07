@@ -508,7 +508,7 @@ def render_index_html(summary: SiteAnalysisSummary) -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Basement Dampness Local Prototype</title>
+  <title>Basement Dampness</title>
   <link rel="icon" href="data:,">
   <style>
     :root {{
@@ -574,11 +574,9 @@ def render_index_html(summary: SiteAnalysisSummary) -> str:
       letter-spacing: 0;
       overflow-wrap: anywhere;
     }}
-    .note {{
-      border-left: 4px solid var(--accent);
-      background: var(--soft);
-      padding: 10px 12px;
-      max-width: 920px;
+    .report-link {{
+      margin: 0 0 18px;
+      font-size: 13px;
     }}
     .panel-grid {{
       display: grid;
@@ -641,10 +639,9 @@ def render_index_html(summary: SiteAnalysisSummary) -> str:
 </head>
 <body>
   <header>
-    <h1>Basement dampness local prototype</h1>
+    <h1>Basement dampness</h1>
     <div class="subtle">
-      Generated {generated_at}; curated local sensors plus Open-Meteo outdoor humidity
-      and Environment Agency rainfall.
+      Updated {generated_at}; STH51 sensors, Open-Meteo humidity, and Environment Agency rainfall.
     </div>
   </header>
   <main>
@@ -652,12 +649,7 @@ def render_index_html(summary: SiteAnalysisSummary) -> str:
       {cards_html}
     </section>
 
-    <p class="note">
-      Prototype scope: fast local feedback from visible calculations. Event boundaries come from
-      the curated event timeline; weather is public contextual data,
-      not a house-local calibrated station. See the
-      <a href="physics-report.html">physics and metrology report</a>.
-    </p>
+    <p class="report-link subtle"><a href="physics-report.html">Physics and metrology report</a></p>
 
     <h2>Hypothesis Evidence</h2>
     <section class="panel-grid">{render_hypothesis_panel(summary)}</section>
@@ -836,9 +828,9 @@ def render_physics_report_html(summary: SiteAnalysisSummary) -> str:
   <main>
     <p><a href="index.html">Back to dashboard</a></p>
     <p class="note">
-      This first report page explains the shared calculations behind the local dashboard.
-      It is intentionally cautious: current intervals are not yet numeric GUM-style intervals,
-      and qualitative caveats remain separate from measurement uncertainty.
+      Explains the calculation model, evidence limits, and caveats behind the dashboard.
+      Current intervals are not yet numeric GUM-style intervals; qualitative caveats remain
+      separate from measurement uncertainty.
     </p>
 
     <h2>Psychrometric Model</h2>

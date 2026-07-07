@@ -78,6 +78,9 @@ Standing preferences and constraints:
 - [Apply the Cloudflare dashboard zone-setting fixes](issues/06-cloudflare-dashboard-toggles.md) —
   Full strict HTTPS, Always Use HTTPS, Email Address Obfuscation off, and proxied `www` are now
   live; the site Worker also sends `Cache-Control: no-transform` so R2 ETags survive the edge.
+- [Trim frontend text and remove prototype-style language](issues/07-trim-frontend-text-and-language.md) —
+  the dashboard now leads with metrics, removes the prototype scope prose, links the physics
+  report tersely, and regression-tests against local/prototype/provisional rendered wording.
 
 ## Not yet specified
 

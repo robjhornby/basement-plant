@@ -641,9 +641,9 @@ def build_caveats() -> tuple[Caveat, ...]:
         Caveat(
             id="sensor_placement_artifact",
             short_label="Sensor-placement artifact risk",
-            dashboard_text="Sensor moves and local airflow can create apparent humidity changes.",
+            dashboard_text="Sensor moves and nearby airflow can create apparent humidity changes.",
             report_text=(
-                "Some event-bounded comparisons cross sensor moves or altered local airflow. "
+                "Some event-bounded comparisons cross sensor moves or altered nearby airflow. "
                 "Those comparisons should be treated as placement-sensitive until a later "
                 "analysis proves a measure robust across moves."
             ),
@@ -664,10 +664,10 @@ def build_caveats() -> tuple[Caveat, ...]:
         Caveat(
             id="weather_source_mismatch",
             short_label="Weather source mismatch",
-            dashboard_text="Outdoor weather is public contextual data, not a house-local station.",
+            dashboard_text="Outdoor weather is public contextual data, not a calibrated station.",
             report_text=(
-                "Open-Meteo and Environment Agency rainfall are used for local context. They "
-                "may not match the exact outdoor air or rainfall experienced at the property."
+                "Open-Meteo and Environment Agency rainfall are used for area weather context. "
+                "They may not match the exact outdoor air or rainfall experienced at the property."
             ),
             applies_to=("weather", "rain", "hypotheses"),
         ),
@@ -686,7 +686,7 @@ def build_uncertainty_budget() -> tuple[UncertaintyBudgetRow, ...]:
             caveat_ids=("consumer_sensor_specification",),
         ),
         UncertaintyBudgetRow(
-            component="Sensor placement and local airflow",
+            component="Sensor placement and nearby airflow",
             applies_to="period comparisons and hypothesis assessments",
             treatment=(
                 "Tracked as comparability flags and caveats, "

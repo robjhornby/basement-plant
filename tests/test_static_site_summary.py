@@ -159,14 +159,24 @@ def test_dashboard_and_report_render_from_shared_summary() -> None:
 
     dashboard_html = render_index_html(summary)
     report_html = render_physics_report_html(summary)
+    rendered_html = f"{dashboard_html}\n{report_html}"
 
     assert 'href="physics-report.html"' in dashboard_html
+    assert "<title>Basement Dampness</title>" in dashboard_html
+    assert "<h1>Basement dampness</h1>" in dashboard_html
+    assert "Latest basement sample" in dashboard_html
+    assert dashboard_html.index("Latest basement sample") < dashboard_html.index(
+        "Hypothesis Evidence"
+    )
     assert "Basement Versus Outdoor Moisture" in dashboard_html
     assert "Compatible with active basement drying" in dashboard_html
+    assert "Prototype scope" not in dashboard_html
     assert 'href="index.html"' in report_html
     assert "Uncertainty Budget" in report_html
     assert "Comparability flags" in report_html
     assert "Compatible with active basement drying" in report_html
+    for removed_wording in ("local", "prototype", "provisional", "work-in-progress"):
+        assert removed_wording not in rendered_html.lower()
 
 
 def test_render_site_pages_returns_relative_path_to_html_mapping() -> None:
