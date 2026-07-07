@@ -70,3 +70,16 @@ Deployment facts:
 - Live smoke tests passed: `https://basement.robjhornby.com/` and
   `https://basement.robjhornby.com/physics-report.html` return `200` with the expected page
   content; `HEAD` returns `200`; non-GET/HEAD methods return `405`.
+
+## Comments
+
+2026-07-07 route migration follow-up:
+
+- Added [Move public site to /basement path route](44-move-public-site-to-basement-path-route.md)
+  to track moving publication from the temporary subdomain to
+  `https://robjhornby.com/basement/`.
+- Worker version `499e5685-e246-43db-adfd-cb2ca967a5b4` is deployed with both the target
+  `robjhornby.com/basement*` route and the legacy `basement.robjhornby.com/*` fallback route.
+- The target path route works when forced through Cloudflare, but public apex traffic still goes
+  directly to GitHub Pages because the apex DNS record is not proxied. DNS proxying and then tofu
+  cleanup of the old subdomain placeholder remain to finish the migration.

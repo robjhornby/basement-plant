@@ -11,15 +11,8 @@
 # /email/routing/rules endpoint, which the token CAN reach, so it stays in
 # tofu. See README.md "Provider support gaps and manual steps".
 
-# Route the dedicated ingest address to the email-ingest Worker.
-#
-# The rule can only reference a Worker that already exists, so it is gated
-# behind create_email_ingest_rule: first apply creates bucket + routing DNS,
-# then `wrangler deploy` publishes the Worker, then a second apply with
-# create_email_ingest_rule=true creates this rule.
+# Route the dedicated ingest address to the already-deployed email-ingest Worker.
 resource "cloudflare_email_routing_rule" "ingest_to_worker" {
-  count = var.create_email_ingest_rule ? 1 : 0
-
   zone_id = var.zone_id
   name    = "basement ingest to email-ingest worker"
   enabled = true

@@ -5,17 +5,21 @@ Durable Cloudflare infrastructure for the basement analysis belongs here, not un
 The target hosted path is documented in
 [Cloudflare Email To R2 Static Site Architecture](../../docs/architecture/cloudflare-email-r2-static-site.md).
 
+Cloudflare OpenTofu authentication is project-local: `tofu/.envrc` exports
+`CLOUDFLARE_API_TOKEN`. Agents and humans running `tofu plan` or `tofu apply` should either use
+`direnv allow`/an already-loaded direnv shell, or explicitly source `tofu/.envrc` before running
+OpenTofu commands. Do not assume a shell in this repo root has that variable loaded.
+
 Current contents:
 
 - `tofu/`: OpenTofu root for durable Cloudflare resources — the private `basement-pipeline` R2
-  bucket, the private `basement-site` publication bucket, the site DNS record, and the
-  ingest-address-to-Worker routing rule. See `tofu/README.md` for apply ordering and provider
-  gaps.
+  bucket, the private `basement-site` publication bucket, and the ingest-address-to-Worker routing
+  rule. See `tofu/README.md` for apply ordering and provider gaps.
 - `workers/email-ingest/`: Wrangler-managed TypeScript Email Worker that receives X-Sense CSV
   emails, stores immutable raw `.eml` evidence, extracts CSV attachments, and writes ingest and
   rejection manifests. See `workers/email-ingest/README.md` for tests and deploy steps.
 - `workers/site/`: Wrangler-managed TypeScript GET-only Worker that serves generated HTML from
-  the `basement-site` R2 bucket on `basement.robjhornby.com`.
+  the `basement-site` R2 bucket under `https://robjhornby.com/basement/`.
 
 Expected future contents:
 

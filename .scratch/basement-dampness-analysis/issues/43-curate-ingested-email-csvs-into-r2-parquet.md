@@ -1,7 +1,7 @@
 # Curate ingested email CSVs into R2 Parquet
 
 Type: task
-Status: open
+Status: claimed
 Parent: ../map.md
 Blocked by: 42
 

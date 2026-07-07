@@ -5,8 +5,9 @@ dedicated private `basement-site` R2 bucket.
 
 Routes:
 
-- `/` and `/index.html` -> `index.html`
-- `/physics-report.html` -> `physics-report.html`
+- `/basement` -> `/basement/` (`308`)
+- `/basement/` and `/basement/index.html` -> `index.html`
+- `/basement/physics-report.html` -> `physics-report.html`
 
 All other paths return `404`; methods other than `GET` and `HEAD` return `405`.
 The Worker is intentionally not a general-purpose R2 file browser.

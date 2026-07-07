@@ -67,18 +67,22 @@ Prerequisites: a Cloudflare API token with R2 Write, Workers Scripts Write, Zone
 Zone Email Routing Write for `robjhornby.com` (or use `npx wrangler login`). No Worker secrets are
 required — the Worker only uses the R2 binding.
 
-1. Create durable resources (bucket + Email Routing settings/DNS):
+1. Apply durable resources:
 
    ```bash
    cd infra/cloudflare/tofu
    cp env/example.tfvars env/production.tfvars   # fill in account_id and zone_id
-   export CLOUDFLARE_API_TOKEN=...
+   direnv allow .
+   # or: set -a; source .envrc; set +a
    tofu init
    tofu plan  -var-file=env/production.tfvars
    tofu apply -var-file=env/production.tfvars
    ```
 
-2. Deploy this Worker:
+   OpenTofu owns the R2 buckets and the Email Routing rule. Email Routing enablement and MX/SPF
+   setup remain one-time dashboard actions documented in `../../tofu/README.md`.
+
+2. Deploy this Worker after changing its code:
 
    ```bash
    cd infra/cloudflare/workers/email-ingest
@@ -86,20 +90,10 @@ required — the Worker only uses the R2 binding.
    npx wrangler deploy
    ```
 
-3. Create the Email Routing rule that points `basement-ingest@robjhornby.com` at the Worker (the
-   rule can only reference an already-deployed Worker, hence the second apply):
-
-   ```bash
-   cd infra/cloudflare/tofu
-   tofu apply -var-file=env/production.tfvars -var=create_email_ingest_rule=true
-   ```
-
-   (Or set `create_email_ingest_rule = true` in `env/production.tfvars`.)
-
-4. Point the source at the ingest address: configure X-Sense to send the daily export to
+3. Point the source at the ingest address: configure X-Sense to send the daily export to
    `basement-ingest@robjhornby.com`, or add a Gmail forwarding filter for the X-Sense export
    emails to that address (Gmail keeps its copy for recovery).
 
-5. Verify: send/forward one export email, watch `npx wrangler tail basement-email-ingest` for the
+4. Verify: send/forward one export email, watch `npx wrangler tail basement-email-ingest` for the
    `email_ingest` log line, and confirm the manifest object exists (dashboard, or
    `npx wrangler r2 object get basement-pipeline/<manifest key> --pipe`).

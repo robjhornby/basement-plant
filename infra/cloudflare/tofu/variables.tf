@@ -43,20 +43,3 @@ variable "email_ingest_worker_name" {
   type        = string
   default     = "basement-email-ingest"
 }
-
-variable "site_worker_subdomain" {
-  description = "Subdomain used for the public basement site Worker route."
-  type        = string
-  default     = "basement"
-}
-
-variable "create_email_ingest_rule" {
-  description = <<-EOT
-    Create the Email Routing rule that sends the ingest address to the Worker.
-    Leave false for the first apply: the rule can only reference a Worker that is
-    already deployed, so the order is tofu apply -> wrangler deploy -> set this
-    true -> tofu apply again.
-  EOT
-  type        = bool
-  default     = false
-}

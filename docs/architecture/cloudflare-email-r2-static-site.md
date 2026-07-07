@@ -100,14 +100,16 @@ and free Workers cannot host the Python/DuckDB analysis workload.
 ## Publication Shape
 
 Publish static artifacts as R2 objects behind a small GET-only Worker route. The Worker binds to
-the `basement-site` bucket on `basement.robjhornby.com` and serves only:
+the `basement-site` bucket on `robjhornby.com/basement*` and serves only:
 
-- `/` and `/index.html` -> `index.html`
-- `/physics-report.html` -> `physics-report.html`
+- `/basement` -> `/basement/` (`308`)
+- `/basement/` and `/basement/index.html` -> `index.html`
+- `/basement/physics-report.html` -> `physics-report.html`
 
 Pages and Workers static assets are intentionally not used because they couple daily content
 publishes to a Wrangler/Node code deploy. The Worker code deploy is rare; daily publication is just
 R2 object writes by the analysis runner.
+
 
 ## Deployment Shape
 

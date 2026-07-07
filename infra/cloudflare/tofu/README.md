@@ -6,7 +6,9 @@ to the `basement-email-ingest` Worker. Worker code/config is owned by Wrangler u
 `../workers/email-ingest/` and `../workers/site/`.
 
 ```bash
-export CLOUDFLARE_API_TOKEN=...   # R2 Write, Zone DNS Write, Zone Email Routing Write
+direnv allow .                    # loads CLOUDFLARE_API_TOKEN from .envrc
+# or, without direnv:
+# set -a; source .envrc; set +a
 cp env/example.tfvars env/production.tfvars   # fill in account_id and zone_id
 tofu init
 tofu fmt -check -recursive
@@ -15,15 +17,13 @@ tofu plan  -var-file=env/production.tfvars
 tofu apply -var-file=env/production.tfvars
 ```
 
-Apply ordering: the Email Routing rule (`create_email_ingest_rule`) is gated off by default
-because the provider's rule action references the Worker by name and the Worker must already be
-deployed. Order is: `tofu apply` -> `wrangler deploy` (in `../workers/email-ingest/`) ->
-`tofu apply -var=create_email_ingest_rule=true`.
+The site bucket can be created in the first `tofu apply`. Deploy the site Worker from
+`../workers/site/` after that bucket exists, then set the GitHub Actions secret
+`R2_SITE_BUCKET=basement-site`. The R2 S3 credentials used by the workflow need object read/write
+scope for `basement-pipeline` and `basement-site`.
 
-The site bucket and proxied `basement.robjhornby.com` DNS record can be created in the first
-`tofu apply`. Deploy the site Worker from `../workers/site/` after that bucket exists, then set
-the GitHub Actions secret `R2_SITE_BUCKET=basement-site`. The R2 S3 credentials used by the
-workflow need object read/write scope for `basement-pipeline` and `basement-site`.
+This OpenTofu configuration no longer declares a site DNS placeholder. Applying the cleanup with
+Zone DNS Write credentials will destroy the old `basement.robjhornby.com` placeholder record.
 
 ## Provider support gaps and manual steps
 

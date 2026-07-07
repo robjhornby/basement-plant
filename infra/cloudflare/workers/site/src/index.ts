@@ -1,11 +1,26 @@
 const SITE_OBJECT_KEYS = new Set(["index.html", "physics-report.html"]);
+const SITE_BASE_PATH = "/basement";
 
 export function siteObjectKey(pathname: string): string | null {
-  if (pathname === "/" || pathname === "/index.html") {
+  if (pathname === `${SITE_BASE_PATH}/` || pathname === `${SITE_BASE_PATH}/index.html`) {
     return "index.html";
   }
-  const pathKey = pathname.replace(/^\/+/, "");
+  if (!pathname.startsWith(`${SITE_BASE_PATH}/`)) {
+    return null;
+  }
+
+  const pathKey = pathname.slice(SITE_BASE_PATH.length + 1);
   return SITE_OBJECT_KEYS.has(pathKey) ? pathKey : null;
+}
+
+function trailingSlashRedirect(request: Request): Response | null {
+  const url = new URL(request.url);
+  if (url.pathname !== SITE_BASE_PATH) {
+    return null;
+  }
+
+  url.pathname = `${SITE_BASE_PATH}/`;
+  return Response.redirect(url.toString(), 308);
 }
 
 function responseHeaders(object: R2ObjectBody): Headers {
@@ -25,6 +40,11 @@ export default {
         status: 405,
         headers: { allow: "GET, HEAD" },
       });
+    }
+
+    const redirect = trailingSlashRedirect(request);
+    if (redirect !== null) {
+      return redirect;
     }
 
     const url = new URL(request.url);
