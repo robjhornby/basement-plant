@@ -1,18 +1,23 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 
 from basement_analysis.curated_dataset import parse_curated_data_location
+from basement_analysis.hosted_curation import curate_accepted_email_csvs
 from basement_analysis.raw_email_ingest import print_ingest_results, process_raw_email_batch
 from basement_analysis.static_site import build_static_site
 
 
 def main(argv: Sequence[str] | None = None) -> None:
-    argument_list = list(argv) if argv is not None else None
+    argument_list = list(argv) if argv is not None else sys.argv[1:]
     if argument_list and argument_list[0] == "ingest-emails":
         ingest_emails(argument_list[1:])
+        return
+    if argument_list and argument_list[0] == "curate-ingested-r2":
+        curate_ingested_r2(argument_list[1:])
         return
     if argument_list and argument_list[0] == "build-site":
         argument_list = argument_list[1:]
@@ -105,3 +110,57 @@ def ingest_emails(argv: Sequence[str] | None = None) -> None:
         raw_object_key_prefix=args.raw_object_key_prefix,
     )
     print_ingest_results(results)
+
+
+def curate_ingested_r2(argv: Sequence[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Merge accepted X-Sense CSV objects from a local R2 mirror into hosted "
+            "partitioned Parquet."
+        )
+    )
+    parser.add_argument(
+        "--object-store-dir",
+        type=Path,
+        default=Path("build/r2-pipeline"),
+        help="Local directory mirroring the R2 pipeline bucket's manifests and csv prefixes.",
+    )
+    parser.add_argument(
+        "--curated-data-dir",
+        type=Path,
+        default=Path("build/curated-r2-parquet"),
+        help="Local directory where the refreshed partitioned Parquet tree is written.",
+    )
+    parser.add_argument(
+        "--existing-curated-data-dir",
+        type=parse_curated_data_location,
+        default=None,
+        help=("Existing curated Parquet root to merge from. Defaults to s3://$R2_BUCKET/parquet."),
+    )
+    parser.add_argument(
+        "--work-dir",
+        type=Path,
+        default=Path("build/hosted-curation"),
+        help="Scratch directory for staged accepted CSVs and weather API cache files.",
+    )
+    parser.add_argument(
+        "--refresh-weather",
+        action="store_true",
+        help="Ignore cached public weather API responses while rebuilding weather partitions.",
+    )
+    args = parser.parse_args(argv)
+
+    result = curate_accepted_email_csvs(
+        object_store_dir=args.object_store_dir,
+        curated_dataset_dir=args.curated_data_dir,
+        work_dir=args.work_dir,
+        existing_curated_dataset_root=args.existing_curated_data_dir,
+        refresh_weather=bool(args.refresh_weather),
+    )
+    print(f"Accepted CSV objects: {result.accepted_csv_count:,}")
+    print(f"Existing sensor rows: {result.existing_sensor_row_count:,}")
+    print(f"Staged sensor rows: {result.staged_sensor_row_count:,}")
+    print(f"Merged sensor rows: {result.merged_sensor_row_count:,}")
+    print(f"Weather hours: {result.weather_hour_count:,}")
+    print(f"Rain readings: {result.rain_reading_count:,}")
+    print(f"Curated data: {result.curated_dataset_dir}")

@@ -31,6 +31,40 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Download accepted ingest manifests and CSVs from R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          # R2 predates the aws-cli default CRC32 request checksums; only send them when required.
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+        run: |
+          aws s3 sync "s3://$R2_BUCKET/manifests/ingest" build/r2-pipeline/manifests/ingest \
+            --endpoint-url "$R2_ENDPOINT_URL" --no-progress
+          aws s3 sync "s3://$R2_BUCKET/csv/source=x-sense" build/r2-pipeline/csv/source=x-sense \
+            --endpoint-url "$R2_ENDPOINT_URL" --no-progress
+
+      - name: Curate accepted email CSVs into Parquet
+        run: >
+          uv run basement curate-ingested-r2
+          --object-store-dir build/r2-pipeline
+          --curated-data-dir build/curated-r2-parquet
+          --refresh-weather
+
+      - name: Publish refreshed curated Parquet to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          # R2 predates the aws-cli default CRC32 request checksums; only send them when required.
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+        run: >
+          aws s3 sync build/curated-r2-parquet "s3://$R2_BUCKET/parquet"
+          --delete
+          --endpoint-url "$R2_ENDPOINT_URL" --no-progress
+
       - name: Build static site from curated Parquet in R2
         run: >
           uv run basement --reuse-curated

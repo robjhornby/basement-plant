@@ -4,6 +4,7 @@ import csv
 import html
 import json
 import math
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -43,6 +44,11 @@ SENSOR_FILE_LABELS = {
     "Thermo-hygrometer 2_Export Data_202601031200_202607031200.csv": "Bedroom",
     "Thermo-hygrometer 3_Export Data_202601031200_202607031200.csv": "Living room",
 }
+SENSOR_FILENAME_LABEL_PATTERNS = (
+    (re.compile(r"^Thermo-hygrometer_Export Data_.*\.csv$"), "Basement"),
+    (re.compile(r"^Thermo-hygrometer 2_Export Data_.*\.csv$"), "Bedroom"),
+    (re.compile(r"^Thermo-hygrometer 3_Export Data_.*\.csv$"), "Living room"),
+)
 
 
 @dataclass(frozen=True)
@@ -71,8 +77,8 @@ def format_optional_float(value: float | None, digits: int = 2) -> str:
 
 def load_sensor_readings(data_dir: Path) -> list[SensorReading]:
     readings: list[SensorReading] = []
-    for csv_path in sorted(data_dir.glob("Thermo-hygrometer*.csv")):
-        location = SENSOR_FILE_LABELS.get(csv_path.name, csv_path.stem.split("_Export", 1)[0])
+    for csv_path in sorted(data_dir.rglob("Thermo-hygrometer*.csv")):
+        location = sensor_location_for_filename(csv_path.name)
         with csv_path.open(newline="", encoding="utf-8-sig") as csv_file:
             reader = csv.DictReader(csv_file)
             for row in reader:
@@ -91,6 +97,15 @@ def load_sensor_readings(data_dir: Path) -> list[SensorReading]:
                     )
                 )
     return sorted(readings, key=lambda reading: (reading.location, reading.timestamp))
+
+
+def sensor_location_for_filename(filename: str) -> str:
+    if filename in SENSOR_FILE_LABELS:
+        return SENSOR_FILE_LABELS[filename]
+    for pattern, label in SENSOR_FILENAME_LABEL_PATTERNS:
+        if pattern.match(filename):
+            return label
+    return Path(filename).stem.split("_Export", 1)[0]
 
 
 def required_csv_value(row: dict[str, str | None], key: str) -> str:
