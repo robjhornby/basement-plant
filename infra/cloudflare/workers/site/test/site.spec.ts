@@ -33,6 +33,8 @@ describe("site Worker", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(response.headers.get("cache-control")).toBe("no-transform");
+    expect(response.headers.get("etag")).not.toBeNull();
     expect(await response.text()).toContain("Dashboard");
   });
 

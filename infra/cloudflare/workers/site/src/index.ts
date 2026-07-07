@@ -27,6 +27,7 @@ function responseHeaders(object: R2ObjectBody): Headers {
   const headers = new Headers();
   object.writeHttpMetadata(headers);
   headers.set("etag", object.httpEtag);
+  headers.set("cache-control", "no-transform");
   if (!headers.has("content-type")) {
     headers.set("content-type", "text/html; charset=utf-8");
   }
