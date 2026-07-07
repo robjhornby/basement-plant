@@ -1,23 +1,39 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from collections.abc import Sequence
 from pathlib import Path
+from typing import cast
 
 from basement_analysis.curated_dataset import parse_curated_data_location
 from basement_analysis.hosted_curation import curate_accepted_email_csvs
+from basement_analysis.observability import (
+    PhaseRecorder,
+    configure_run_logging,
+    load_command_timing_records,
+    render_timings_markdown,
+    write_build_info,
+    write_command_timing_record,
+)
 from basement_analysis.raw_email_ingest import print_ingest_results, process_raw_email_batch
 from basement_analysis.static_site import build_static_site
 
+DEFAULT_TIMINGS_DIR = Path("build/timings")
+
 
 def main(argv: Sequence[str] | None = None) -> None:
+    configure_run_logging()
     argument_list = list(argv) if argv is not None else sys.argv[1:]
     if argument_list and argument_list[0] == "ingest-emails":
         ingest_emails(argument_list[1:])
         return
     if argument_list and argument_list[0] == "curate-ingested-r2":
         curate_ingested_r2(argument_list[1:])
+        return
+    if argument_list and argument_list[0] == "timings-summary":
+        timings_summary(argument_list[1:])
         return
     if argument_list and argument_list[0] == "build-site":
         argument_list = argument_list[1:]
@@ -60,18 +76,44 @@ def build_site(argv: Sequence[str] | None = None) -> None:
         action="store_true",
         help="Build the site from existing curated Parquet files without reading CSVs or APIs.",
     )
+    parser.add_argument(
+        "--timings-dir",
+        type=Path,
+        default=DEFAULT_TIMINGS_DIR,
+        help="Directory where per-command phase-timing JSON records are written and read.",
+    )
     args = parser.parse_args(argv)
 
+    recorder = PhaseRecorder()
     result = build_static_site(
         data_dir=args.data_dir,
         output_dir=args.output_dir,
         refresh_weather=bool(args.refresh_weather),
         curated_dataset_dir=args.curated_data_dir,
         rebuild_curated_dataset=not bool(args.reuse_curated),
+        phase_recorder=recorder,
+    )
+    site_counts = {
+        "sensor_row_count": result.sensor_row_count,
+        "weather_hour_count": result.weather_hour_count,
+        "rain_reading_count": result.rain_reading_count,
+    }
+    write_command_timing_record(
+        timings_dir=args.timings_dir,
+        command="build-site",
+        recorder=recorder,
+        counts=site_counts,
+    )
+    build_info_path = write_build_info(
+        build_info_path=args.output_dir / "build-info.json",
+        newest_sensor_reading=result.newest_sensor_reading,
+        counts=site_counts,
+        command_records=load_command_timing_records(args.timings_dir),
     )
 
     print(f"Wrote {result.index_path}")
     print(f"Wrote {result.report_path}")
+    print(f"Wrote {build_info_path}")
     print(f"Curated data: {result.curated_dataset_dir}")
     print(f"Sensor rows: {result.sensor_row_count:,}")
     print(f"Weather hours: {result.weather_hour_count:,}")
@@ -148,14 +190,35 @@ def curate_ingested_r2(argv: Sequence[str] | None = None) -> None:
         action="store_true",
         help="Ignore cached public weather API responses while rebuilding weather partitions.",
     )
+    parser.add_argument(
+        "--timings-dir",
+        type=Path,
+        default=DEFAULT_TIMINGS_DIR,
+        help="Directory where this command's phase-timing JSON record is written.",
+    )
     args = parser.parse_args(argv)
 
+    recorder = PhaseRecorder()
     result = curate_accepted_email_csvs(
         object_store_dir=args.object_store_dir,
         curated_dataset_dir=args.curated_data_dir,
         work_dir=args.work_dir,
         existing_curated_dataset_root=args.existing_curated_data_dir,
         refresh_weather=bool(args.refresh_weather),
+        phase_recorder=recorder,
+    )
+    write_command_timing_record(
+        timings_dir=args.timings_dir,
+        command="curate-ingested-r2",
+        recorder=recorder,
+        counts={
+            "accepted_csv_count": result.accepted_csv_count,
+            "existing_sensor_row_count": result.existing_sensor_row_count,
+            "staged_sensor_row_count": result.staged_sensor_row_count,
+            "merged_sensor_row_count": result.merged_sensor_row_count,
+            "weather_hour_count": result.weather_hour_count,
+            "rain_reading_count": result.rain_reading_count,
+        },
     )
     print(f"Accepted CSV objects: {result.accepted_csv_count:,}")
     print(f"Existing sensor rows: {result.existing_sensor_row_count:,}")
@@ -164,3 +227,32 @@ def curate_ingested_r2(argv: Sequence[str] | None = None) -> None:
     print(f"Weather hours: {result.weather_hour_count:,}")
     print(f"Rain readings: {result.rain_reading_count:,}")
     print(f"Curated data: {result.curated_dataset_dir}")
+
+
+def timings_summary(argv: Sequence[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Print recorded pipeline phase timings (and optional build info) as markdown, "
+            "for example into a GitHub Actions job summary."
+        )
+    )
+    parser.add_argument(
+        "--timings-dir",
+        type=Path,
+        default=DEFAULT_TIMINGS_DIR,
+        help="Directory containing per-command phase-timing JSON records.",
+    )
+    parser.add_argument(
+        "--build-info",
+        type=Path,
+        default=None,
+        help="Optional build-info.json whose freshness fields are appended to the summary.",
+    )
+    args = parser.parse_args(argv)
+
+    build_info: dict[str, object] | None = None
+    if args.build_info is not None:
+        build_info = cast(
+            dict[str, object], json.loads(args.build_info.read_text(encoding="utf-8"))
+        )
+    print(render_timings_markdown(load_command_timing_records(args.timings_dir), build_info))

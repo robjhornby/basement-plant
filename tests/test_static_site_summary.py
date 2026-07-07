@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime
+import json
+from datetime import date, datetime
 from pathlib import Path
 
 from basement_analysis.static_site import (
+    fetch_open_meteo_weather,
     render_index_html,
     render_physics_report_html,
     render_site_pages,
@@ -50,6 +52,39 @@ def weather_hour(
         rain_mm=0.0,
         absolute_humidity_g_m3=absolute_humidity,
     )
+
+
+def test_fetch_open_meteo_weather_drops_hours_with_null_values(tmp_path: Path) -> None:
+    cache_dir = tmp_path / "cache"
+    cache_path = cache_dir / "open_meteo_2026-07-03_2026-07-03.json"
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    cache_path.write_text(
+        json.dumps(
+            {
+                "hourly": {
+                    "time": ["2026-07-03T00:00", "2026-07-03T01:00", "2026-07-03T02:00"],
+                    "temperature_2m": [16.0, None, 15.5],
+                    "relative_humidity_2m": [70.0, 71.0, 72.0],
+                    "dew_point_2m": [10.0, 10.5, None],
+                    "precipitation": [0.0, 0.1, 0.2],
+                    "rain": [0.0, 0.1, 0.2],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    weather_hours = fetch_open_meteo_weather(
+        start_date=date(2026, 7, 3),
+        end_date=date(2026, 7, 3),
+        cache_dir=cache_dir,
+        refresh=False,
+    )
+
+    assert [hour.timestamp for hour in weather_hours] == [
+        datetime.fromisoformat("2026-07-03T00:00:00")
+    ]
+    assert weather_hours[0].temperature_c == 16.0
 
 
 def test_site_analysis_summary_builds_shared_dashboard_and_report_values() -> None:

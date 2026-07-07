@@ -59,6 +59,7 @@ jobs:
           uv run basement curate-ingested-r2
           --object-store-dir build/r2-pipeline
           --curated-data-dir build/curated-r2-parquet
+          --timings-dir build/timings
           --refresh-weather
 
       - name: Publish refreshed curated Parquet to R2
@@ -79,6 +80,7 @@ jobs:
           uv run basement --reuse-curated
           --output-dir build/gha-site/site
           --curated-data-dir "s3://$R2_BUCKET/parquet"
+          --timings-dir build/timings
 
       - name: Publish site HTML to R2
         env:
@@ -88,8 +90,22 @@ jobs:
           # R2 predates the aws-cli default CRC32 request checksums; only send them when required.
           AWS_REQUEST_CHECKSUM_CALCULATION: when_required
           AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
-        run: >
-          aws s3 sync build/gha-site/site "s3://$R2_SITE_BUCKET"
-          --exclude '*' --include 'index.html' --include 'physics-report.html'
-          --content-type 'text/html; charset=utf-8'
-          --endpoint-url "$R2_ENDPOINT_URL" --no-progress
+        run: |
+          aws s3 sync build/gha-site/site "s3://$R2_SITE_BUCKET" \
+            --exclude '*' --include 'index.html' --include 'physics-report.html' \
+            --content-type 'text/html; charset=utf-8' \
+            --endpoint-url "$R2_ENDPOINT_URL" --no-progress
+          aws s3 cp build/gha-site/site/build-info.json "s3://$R2_SITE_BUCKET/build-info.json" \
+            --content-type 'application/json; charset=utf-8' \
+            --endpoint-url "$R2_ENDPOINT_URL" --no-progress
+
+      - name: Write phase timings to the job summary
+        if: always()
+        run: |
+          if [ -d build/timings ]; then
+            uv run basement timings-summary \
+              --timings-dir build/timings \
+              $( [ -f build/gha-site/site/build-info.json ] && \
+                 echo --build-info build/gha-site/site/build-info.json ) \
+              >> "$GITHUB_STEP_SUMMARY"
+          fi

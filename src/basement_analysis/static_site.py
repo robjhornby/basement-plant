@@ -20,6 +20,7 @@ from basement_analysis.curated_dataset import (
     load_curated_dataset,
     write_curated_dataset,
 )
+from basement_analysis.observability import PhaseRecorder
 from basement_analysis.summaries import (
     ChartSeries,
     ChartSpec,
@@ -59,6 +60,7 @@ class BuildResult:
     sensor_row_count: int
     weather_hour_count: int
     rain_reading_count: int
+    newest_sensor_reading: datetime
 
 
 def parse_local_datetime(raw_value: str) -> datetime:
@@ -180,37 +182,50 @@ def fetch_open_meteo_weather(
     hourly = cast(dict[str, Sequence[object]], payload["hourly"])
 
     times = cast(Sequence[str], hourly["time"])
-    temperatures = numeric_sequence(hourly["temperature_2m"])
-    relative_humidities = numeric_sequence(hourly["relative_humidity_2m"])
-    dew_points = numeric_sequence(hourly["dew_point_2m"])
-    precipitation = numeric_sequence(hourly["precipitation"])
-    rain = numeric_sequence(hourly["rain"])
+    temperatures = nullable_numeric_sequence(hourly["temperature_2m"])
+    relative_humidities = nullable_numeric_sequence(hourly["relative_humidity_2m"])
+    dew_points = nullable_numeric_sequence(hourly["dew_point_2m"])
+    precipitation = nullable_numeric_sequence(hourly["precipitation"])
+    rain = nullable_numeric_sequence(hourly["rain"])
 
     weather_hours: list[WeatherHour] = []
     for index, raw_time in enumerate(times):
         temperature_c = temperatures[index]
         relative_humidity_pct = relative_humidities[index]
+        dew_point_c = dew_points[index]
+        precipitation_mm = precipitation[index]
+        rain_mm = rain[index]
+        if (
+            temperature_c is None
+            or relative_humidity_pct is None
+            or dew_point_c is None
+            or precipitation_mm is None
+            or rain_mm is None
+        ):
+            # The archive API returns nulls for hours it has not backfilled yet; a fabricated
+            # 0°C/0%RH reading would poison the curated history, so drop the hour instead.
+            continue
         weather_hours.append(
             WeatherHour(
                 timestamp=datetime.fromisoformat(raw_time),
                 temperature_c=temperature_c,
                 relative_humidity_pct=relative_humidity_pct,
-                dew_point_c=dew_points[index],
-                precipitation_mm=precipitation[index],
-                rain_mm=rain[index],
+                dew_point_c=dew_point_c,
+                precipitation_mm=precipitation_mm,
+                rain_mm=rain_mm,
                 absolute_humidity_g_m3=absolute_humidity_g_m3(temperature_c, relative_humidity_pct),
             )
         )
     return weather_hours
 
 
-def numeric_sequence(values: Sequence[object]) -> list[float]:
-    result: list[float] = []
+def nullable_numeric_sequence(values: Sequence[object]) -> list[float | None]:
+    result: list[float | None] = []
     for value in values:
         if isinstance(value, int | float):
             result.append(float(value))
         elif value is None:
-            result.append(0.0)
+            result.append(None)
         else:
             raise TypeError(f"Expected numeric API value, got {value!r}")
     return result
@@ -888,7 +903,9 @@ def build_static_site(
     refresh_weather: bool = False,
     curated_dataset_dir: CuratedDataRoot | None = None,
     rebuild_curated_dataset: bool = True,
+    phase_recorder: PhaseRecorder | None = None,
 ) -> BuildResult:
+    recorder = phase_recorder if phase_recorder is not None else PhaseRecorder()
     resolved_curated_dataset_dir = (
         curated_dataset_dir if curated_dataset_dir is not None else output_dir / "curated-data"
     )
@@ -899,7 +916,8 @@ def build_static_site(
                 "Rebuilding the curated dataset needs a local --curated-data-dir; "
                 "an s3:// location can only be read with --reuse-curated."
             )
-        sensor_readings_from_csv = load_sensor_readings(data_dir)
+        with recorder.phase("load-sensor-csvs"):
+            sensor_readings_from_csv = load_sensor_readings(data_dir)
         if not sensor_readings_from_csv:
             raise ValueError(f"No sensor readings found in {data_dir}")
 
@@ -907,41 +925,49 @@ def build_static_site(
         dataset_start = min(reading.timestamp for reading in sensor_readings_from_csv)
         dataset_end = max(reading.timestamp for reading in sensor_readings_from_csv)
         cache_dir = output_dir / "cache"
-        weather_hours_from_api = fetch_open_meteo_weather(
-            start_date=dataset_start.date(),
-            end_date=dataset_end.date(),
-            cache_dir=cache_dir,
-            refresh=refresh_weather,
-        )
-        rain_readings_from_api = fetch_environment_agency_rainfall(
-            start_date=dataset_start.date(),
-            end_date=dataset_end.date(),
-            cache_dir=cache_dir,
-            refresh=refresh_weather,
-        )
-        write_curated_dataset(
-            dataset_dir=resolved_curated_dataset_dir,
-            sensor_readings=sensor_readings_from_csv,
-            events=events_from_csv,
-            weather_hours=weather_hours_from_api,
-            rain_readings=rain_readings_from_api,
-        )
+        with recorder.phase("fetch-open-meteo-weather"):
+            weather_hours_from_api = fetch_open_meteo_weather(
+                start_date=dataset_start.date(),
+                end_date=dataset_end.date(),
+                cache_dir=cache_dir,
+                refresh=refresh_weather,
+            )
+        with recorder.phase("fetch-environment-agency-rainfall"):
+            rain_readings_from_api = fetch_environment_agency_rainfall(
+                start_date=dataset_start.date(),
+                end_date=dataset_end.date(),
+                cache_dir=cache_dir,
+                refresh=refresh_weather,
+            )
+        with recorder.phase("write-curated-parquet"):
+            write_curated_dataset(
+                dataset_dir=resolved_curated_dataset_dir,
+                sensor_readings=sensor_readings_from_csv,
+                events=events_from_csv,
+                weather_hours=weather_hours_from_api,
+                rain_readings=rain_readings_from_api,
+            )
 
-    curated_dataset = load_curated_dataset(resolved_curated_dataset_dir)
+    with recorder.phase("load-curated-parquet"):
+        curated_dataset = load_curated_dataset(resolved_curated_dataset_dir)
     sensor_readings = list(curated_dataset.sensor_readings)
     if not sensor_readings:
         raise ValueError(f"No curated sensor readings found in {resolved_curated_dataset_dir}")
 
-    summary = build_site_analysis_summary(
-        sensor_readings=sensor_readings,
-        events=curated_dataset.events,
-        weather_hours=curated_dataset.weather_hours,
-        rain_readings=curated_dataset.rain_readings,
-        input_files=curated_dataset.parquet_files,
-        event_timeline_source=join_curated_data_path(resolved_curated_dataset_dir, "events"),
-    )
+    with recorder.phase("build-summary"):
+        summary = build_site_analysis_summary(
+            sensor_readings=sensor_readings,
+            events=curated_dataset.events,
+            weather_hours=curated_dataset.weather_hours,
+            rain_readings=curated_dataset.rain_readings,
+            input_files=curated_dataset.parquet_files,
+            event_timeline_source=join_curated_data_path(resolved_curated_dataset_dir, "events"),
+        )
 
-    written_paths = write_site_pages(render_site_pages(summary), output_dir)
+    with recorder.phase("render-site"):
+        rendered_pages = render_site_pages(summary)
+    with recorder.phase("write-site"):
+        written_paths = write_site_pages(rendered_pages, output_dir)
     return BuildResult(
         index_path=written_paths["index.html"],
         report_path=written_paths["physics-report.html"],
@@ -949,4 +975,5 @@ def build_static_site(
         sensor_row_count=len(sensor_readings),
         weather_hour_count=len(curated_dataset.weather_hours),
         rain_reading_count=len(curated_dataset.rain_readings),
+        newest_sensor_reading=max(reading.timestamp for reading in sensor_readings),
     )

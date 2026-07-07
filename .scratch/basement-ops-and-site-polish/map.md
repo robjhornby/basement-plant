@@ -1,0 +1,88 @@
+# Basement ops hardening and site polish wayfinding map
+
+Label: wayfinder:map
+
+## Destination
+
+The hosted pipeline is trustworthy and observable — no silent data loss, HTTPS-only serving,
+known nightly-run timings, tidy configuration — and the public site at
+`https://robjhornby.com/basement/` is pleasant to view now (less text, interactive one-week-default
+plots, no prototype-style language) and deliberately designed later (redesign direction chosen
+with the user through mockups). GitHub Pages→Cloudflare hosting consolidation is explicitly out of
+scope.
+
+## Notes
+
+This effort follows the resolved `basement-dampness-analysis` map, which proved the hosted
+Cloudflare email→R2→Parquet→GitHub-Actions→static-site loop end to end. Analytical/physics work
+stays on that map; this map is the "deliberately scoped operations improvements + publication
+polish" successor.
+
+Sources this map was charted from:
+
+- The 2026-07-07 implementation review (Cloudflare live-state findings, pipeline code review) —
+  see [docs/architecture/architecture-diagrams.md](../../docs/architecture/architecture-diagrams.md)
+  for the implemented architecture (deployed pipeline, serving path, local-vs-hosted parity).
+- The user's `basement-dampness-analysis/todo.md` items (pipeline efficiency, observability,
+  diagrams — done, cooler site design, infra config assessment).
+
+Standing preferences and constraints:
+
+- Stay on the Cloudflare Workers Free plan; keep the database-free R2 object/manifest design.
+- OpenTofu owns durable Cloudflare resources, Wrangler owns Worker projects, narrow scripts only
+  for gaps (`infra/cloudflare/`). Zone settings (SSL mode, Always Use HTTPS, obfuscation) are
+  dashboard-only with current tokens — those become human task checklists, not automation.
+- The repo is public: no precise home coordinates, no `data/`, `.envrc`, tfstate/tfvars, or real
+  `.eml` files committed; treat anything pushed as published.
+- Python: type hints everywhere, full-name `snake_case`, focused modules, Ruff, strict Pyright,
+  tests around behavior, `uv` for everything.
+- Efficiency work is measure-first: the nightly run is ~1 minute, so instrument before optimizing,
+  and only fix what timings show to be slow.
+- Site quick wins ship before the bigger redesign; the redesign is human-in-the-loop
+  (grilling → mockup prototypes → grilling), the quick wins and ops fixes are autonomous
+  stretches. Use `/grilling` and `/domain-modeling` on grilling tickets.
+- Interactive plots: vendored uPlot inlined into the generated HTML, data inlined as JSON, no
+  build step, no CDN/external requests. The frontend build-step question is deferred to the
+  redesign arm.
+- The dashboard is the design target; the physics report inherits the shell/typography, no
+  bespoke treatment.
+- Key review facts: EA rainfall API retains only ~4 weeks (station `270397`); Open-Meteo archive
+  covers full history and currently returns no nulls; the pipeline bucket holds stale `site/`
+  prefix objects; GitHub disables cron workflows in public repos after 60 days without activity;
+  `numeric_sequence` in `static_site.py` coerces `None`→`0.0`.
+
+## Decisions so far
+
+<!-- one line per closed ticket: gist + link -->
+
+- [Fix rain and weather history data loss in hosted curation](issues/01-fix-rain-history-data-loss.md) —
+  hosted curation now merges rain/weather partitions (fresh rows win by timestamp) instead of
+  replacing them, and null Open-Meteo hours are dropped rather than coerced to 0.0; verified
+  against live R2 that pre-API-window rain history survives the nightly run.
+
+## Not yet specified
+
+- Redesign implementation tickets — what gets built, in what pieces, and whether a frontend build
+  step arrives — can only be specified after the direction grilling and mockup reaction rounds
+  ([10](issues/10-grill-site-redesign-direction.md) →
+  [12](issues/12-grill-mockup-winner-and-implementation.md)).
+- Whether the efficiency assessment ([04](issues/04-assess-pipeline-efficiency-from-timings.md))
+  spawns real optimization tickets, and which (e.g. partition-level parquet rewrites, skipping
+  unchanged CSV downloads) — depends on what the timings show.
+- Whether the config assessment ([05](issues/05-assess-infra-config-and-env-vars.md)) leads to a
+  mechanical consolidation ticket or concludes the current spread is fine.
+- How data freshness should be surfaced on the site itself (beyond the build-info record) — may
+  fold into the redesign.
+
+## Out of scope
+
+- Hosting the entire robjhornby.com site on Cloudflare and dropping GitHub Pages — explicitly
+  deferred by the user ("not right now"); would be a fresh effort if the destination is ever
+  redrawn.
+- Alerting, anomaly detection, and failure notifications — carried over from the previous map's
+  fog; still waiting until the loop has run unattended for a while.
+- Analytical/physics/metrology improvements and publication-grade write-ups — they belong to the
+  `basement-dampness-analysis` effort's successor work, not this operations/polish map.
+- Durable production email forwarding (X-Sense → ingest address) — still tracked as the open
+  [Configure source email delivery to Cloudflare ingest](../basement-dampness-analysis/issues/20-configure-source-email-delivery-to-cloudflare-ingest.md)
+  ticket on the previous map; not duplicated here.
