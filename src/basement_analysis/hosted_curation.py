@@ -13,6 +13,7 @@ from basement_analysis.curated_dataset import (
     load_curated_dataset,
     write_curated_dataset,
 )
+from basement_analysis.observability import PhaseRecorder
 from basement_analysis.static_site import (
     fetch_environment_agency_rainfall,
     fetch_open_meteo_weather,
@@ -90,18 +91,24 @@ def curate_accepted_email_csvs(
     work_dir: Path,
     existing_curated_dataset_root: CuratedDataRoot | None = None,
     refresh_weather: bool = True,
+    phase_recorder: PhaseRecorder | None = None,
 ) -> HostedCurationResult:
+    recorder = phase_recorder if phase_recorder is not None else PhaseRecorder()
     existing_root = existing_curated_dataset_root or default_existing_curated_dataset_root()
-    existing_dataset = load_curated_dataset(existing_root)
+    with recorder.phase("load-existing-curated-parquet"):
+        existing_dataset = load_curated_dataset(existing_root)
 
-    csv_object_keys = accepted_csv_object_keys(object_store_dir)
-    staged_data_dir = work_dir / "accepted-csvs"
-    stage_accepted_csv_objects(object_store_dir, staged_data_dir, csv_object_keys)
-    staged_sensor_readings = load_sensor_readings(staged_data_dir)
+    with recorder.phase("stage-accepted-csvs"):
+        csv_object_keys = accepted_csv_object_keys(object_store_dir)
+        staged_data_dir = work_dir / "accepted-csvs"
+        stage_accepted_csv_objects(object_store_dir, staged_data_dir, csv_object_keys)
+    with recorder.phase("load-staged-sensor-csvs"):
+        staged_sensor_readings = load_sensor_readings(staged_data_dir)
 
-    merged_sensor_readings = merge_sensor_readings(
-        [*existing_dataset.sensor_readings, *staged_sensor_readings]
-    )
+    with recorder.phase("merge-sensor-readings"):
+        merged_sensor_readings = merge_sensor_readings(
+            [*existing_dataset.sensor_readings, *staged_sensor_readings]
+        )
     if not merged_sensor_readings:
         raise ValueError(
             f"No sensor readings found in existing dataset {existing_root!r} or accepted CSVs "
@@ -111,29 +118,32 @@ def curate_accepted_email_csvs(
     dataset_start = min(reading.timestamp for reading in merged_sensor_readings)
     dataset_end = max(reading.timestamp for reading in merged_sensor_readings)
     cache_dir = work_dir / "cache"
-    fresh_weather_hours = fetch_open_meteo_weather(
-        start_date=dataset_start.date(),
-        end_date=dataset_end.date(),
-        cache_dir=cache_dir,
-        refresh=refresh_weather,
-    )
-    fresh_rain_readings = fetch_environment_agency_rainfall(
-        start_date=dataset_start.date(),
-        end_date=dataset_end.date(),
-        cache_dir=cache_dir,
-        refresh=refresh_weather,
-    )
+    with recorder.phase("fetch-open-meteo-weather"):
+        fresh_weather_hours = fetch_open_meteo_weather(
+            start_date=dataset_start.date(),
+            end_date=dataset_end.date(),
+            cache_dir=cache_dir,
+            refresh=refresh_weather,
+        )
+    with recorder.phase("fetch-environment-agency-rainfall"):
+        fresh_rain_readings = fetch_environment_agency_rainfall(
+            start_date=dataset_start.date(),
+            end_date=dataset_end.date(),
+            cache_dir=cache_dir,
+            refresh=refresh_weather,
+        )
     # The upstream APIs serve a bounded window (the EA rainfall API keeps ~4 weeks), so
     # replacing these partitions would silently discard older history every night.
     weather_hours = merge_weather_hours([*existing_dataset.weather_hours, *fresh_weather_hours])
     rain_readings = merge_rain_readings([*existing_dataset.rain_readings, *fresh_rain_readings])
-    write_curated_dataset(
-        dataset_dir=curated_dataset_dir,
-        sensor_readings=merged_sensor_readings,
-        events=existing_dataset.events,
-        weather_hours=weather_hours,
-        rain_readings=rain_readings,
-    )
+    with recorder.phase("write-curated-parquet"):
+        write_curated_dataset(
+            dataset_dir=curated_dataset_dir,
+            sensor_readings=merged_sensor_readings,
+            events=existing_dataset.events,
+            weather_hours=weather_hours,
+            rain_readings=rain_readings,
+        )
     return HostedCurationResult(
         curated_dataset_dir=curated_dataset_dir,
         accepted_csv_count=len(csv_object_keys),
