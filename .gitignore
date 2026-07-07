@@ -19,6 +19,7 @@ prototypes/*/demo-output/
 prototypes/*/real-output/
 prototypes/*/*.duckdb
 output/
+local/
 
 # Cloudflare prototype local state
 node_modules/
