@@ -3,7 +3,7 @@ name: Build and publish basement site
 on:
   schedule:
     # Daily, after the X-Sense export email should have landed in R2.
-    - cron: "30 6 * * *"
+    - cron: "30 2 * * *"
   workflow_dispatch:
 
 concurrency:
