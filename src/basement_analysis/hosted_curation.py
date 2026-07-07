@@ -144,8 +144,37 @@ def curate_accepted_email_csvs(
 def merge_sensor_readings(readings: list[SensorReading]) -> list[SensorReading]:
     readings_by_identity: dict[tuple[str, datetime], SensorReading] = {}
     for reading in readings:
-        readings_by_identity[(reading.location, reading.timestamp)] = reading
+        normalized_reading = normalize_sensor_reading_location(reading)
+        readings_by_identity[(normalized_reading.location, normalized_reading.timestamp)] = (
+            normalized_reading
+        )
     return sorted(
         readings_by_identity.values(),
         key=lambda reading: (reading.location, reading.timestamp),
     )
+
+
+def normalize_sensor_reading_location(reading: SensorReading) -> SensorReading:
+    canonical_location = canonical_sensor_location(reading.location)
+    if canonical_location == reading.location:
+        return reading
+    return SensorReading(
+        timestamp=reading.timestamp,
+        location=canonical_location,
+        temperature_c=reading.temperature_c,
+        relative_humidity_pct=reading.relative_humidity_pct,
+        absolute_humidity_g_m3=reading.absolute_humidity_g_m3,
+    )
+
+
+def canonical_sensor_location(location: str) -> str:
+    normalized_location = " ".join(location.replace("_", " ").split())
+    match normalized_location:
+        case "Thermo-hygrometer":
+            return "Basement"
+        case "Thermo-hygrometer 2":
+            return "Bedroom"
+        case "Thermo-hygrometer 3":
+            return "Living room"
+        case _:
+            return location

@@ -102,6 +102,13 @@ def load_sensor_readings(data_dir: Path) -> list[SensorReading]:
 def sensor_location_for_filename(filename: str) -> str:
     if filename in SENSOR_FILE_LABELS:
         return SENSOR_FILE_LABELS[filename]
+    normalized_filename = re.sub(r"[_\s]+", " ", filename)
+    if normalized_filename.startswith("Thermo-hygrometer Export Data "):
+        return "Basement"
+    if normalized_filename.startswith("Thermo-hygrometer 2 Export Data "):
+        return "Bedroom"
+    if normalized_filename.startswith("Thermo-hygrometer 3 Export Data "):
+        return "Living room"
     for pattern, label in SENSOR_FILENAME_LABEL_PATTERNS:
         if pattern.match(filename):
             return label

@@ -105,6 +105,7 @@ def test_curate_accepted_email_csvs_merges_existing_parquet_and_staged_csvs(
         sensor_readings=[
             sensor_reading("2026-07-03T00:00:00", "Basement", 18.5, 67.2),
             sensor_reading("2026-07-03T00:01:00", "Basement", 18.5, 67.1),
+            sensor_reading("2026-07-04T00:00:00", "Thermo-hygrometer_3", 20.0, 58.0),
         ],
         events=[Event(datetime.fromisoformat("2026-07-02T21:00:00"), "Dehumidifier on")],
         weather_hours=[weather_hour("2026-07-03T00:00:00")],
@@ -114,7 +115,7 @@ def test_curate_accepted_email_csvs_merges_existing_parquet_and_staged_csvs(
     object_store_dir = tmp_path / "objects"
     bedroom_csv_key = (
         "csv/source=x-sense/export_date=2026-07-04/attachment_sha256=abc123/"
-        "Thermo-hygrometer 2_Export Data_20260704.csv"
+        "Thermo-hygrometer_2_Export_Data_20260704.csv"
     )
     write_csv_object(
         object_store_dir,
@@ -167,13 +168,14 @@ def test_curate_accepted_email_csvs_merges_existing_parquet_and_staged_csvs(
 
     curated_dataset = load_curated_dataset(tmp_path / "curated")
     assert result.accepted_csv_count == 1
-    assert result.existing_sensor_row_count == 2
+    assert result.existing_sensor_row_count == 3
     assert result.staged_sensor_row_count == 2
-    assert result.merged_sensor_row_count == 4
+    assert result.merged_sensor_row_count == 5
     assert [event.description for event in curated_dataset.events] == ["Dehumidifier on"]
     assert {reading.location for reading in curated_dataset.sensor_readings} == {
         "Basement",
         "Bedroom",
+        "Living room",
     }
     assert curated_dataset.weather_hours[-1].timestamp == datetime.fromisoformat(
         "2026-07-04T00:00:00"
