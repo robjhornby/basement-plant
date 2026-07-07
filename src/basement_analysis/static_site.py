@@ -180,37 +180,50 @@ def fetch_open_meteo_weather(
     hourly = cast(dict[str, Sequence[object]], payload["hourly"])
 
     times = cast(Sequence[str], hourly["time"])
-    temperatures = numeric_sequence(hourly["temperature_2m"])
-    relative_humidities = numeric_sequence(hourly["relative_humidity_2m"])
-    dew_points = numeric_sequence(hourly["dew_point_2m"])
-    precipitation = numeric_sequence(hourly["precipitation"])
-    rain = numeric_sequence(hourly["rain"])
+    temperatures = nullable_numeric_sequence(hourly["temperature_2m"])
+    relative_humidities = nullable_numeric_sequence(hourly["relative_humidity_2m"])
+    dew_points = nullable_numeric_sequence(hourly["dew_point_2m"])
+    precipitation = nullable_numeric_sequence(hourly["precipitation"])
+    rain = nullable_numeric_sequence(hourly["rain"])
 
     weather_hours: list[WeatherHour] = []
     for index, raw_time in enumerate(times):
         temperature_c = temperatures[index]
         relative_humidity_pct = relative_humidities[index]
+        dew_point_c = dew_points[index]
+        precipitation_mm = precipitation[index]
+        rain_mm = rain[index]
+        if (
+            temperature_c is None
+            or relative_humidity_pct is None
+            or dew_point_c is None
+            or precipitation_mm is None
+            or rain_mm is None
+        ):
+            # The archive API returns nulls for hours it has not backfilled yet; a fabricated
+            # 0°C/0%RH reading would poison the curated history, so drop the hour instead.
+            continue
         weather_hours.append(
             WeatherHour(
                 timestamp=datetime.fromisoformat(raw_time),
                 temperature_c=temperature_c,
                 relative_humidity_pct=relative_humidity_pct,
-                dew_point_c=dew_points[index],
-                precipitation_mm=precipitation[index],
-                rain_mm=rain[index],
+                dew_point_c=dew_point_c,
+                precipitation_mm=precipitation_mm,
+                rain_mm=rain_mm,
                 absolute_humidity_g_m3=absolute_humidity_g_m3(temperature_c, relative_humidity_pct),
             )
         )
     return weather_hours
 
 
-def numeric_sequence(values: Sequence[object]) -> list[float]:
-    result: list[float] = []
+def nullable_numeric_sequence(values: Sequence[object]) -> list[float | None]:
+    result: list[float | None] = []
     for value in values:
         if isinstance(value, int | float):
             result.append(float(value))
         elif value is None:
-            result.append(0.0)
+            result.append(None)
         else:
             raise TypeError(f"Expected numeric API value, got {value!r}")
     return result

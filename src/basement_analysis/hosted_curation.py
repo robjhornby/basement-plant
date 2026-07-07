@@ -18,7 +18,7 @@ from basement_analysis.static_site import (
     fetch_open_meteo_weather,
     load_sensor_readings,
 )
-from basement_analysis.summaries import SensorReading
+from basement_analysis.summaries import RainReading, SensorReading, WeatherHour
 
 
 @dataclass(frozen=True)
@@ -111,18 +111,22 @@ def curate_accepted_email_csvs(
     dataset_start = min(reading.timestamp for reading in merged_sensor_readings)
     dataset_end = max(reading.timestamp for reading in merged_sensor_readings)
     cache_dir = work_dir / "cache"
-    weather_hours = fetch_open_meteo_weather(
+    fresh_weather_hours = fetch_open_meteo_weather(
         start_date=dataset_start.date(),
         end_date=dataset_end.date(),
         cache_dir=cache_dir,
         refresh=refresh_weather,
     )
-    rain_readings = fetch_environment_agency_rainfall(
+    fresh_rain_readings = fetch_environment_agency_rainfall(
         start_date=dataset_start.date(),
         end_date=dataset_end.date(),
         cache_dir=cache_dir,
         refresh=refresh_weather,
     )
+    # The upstream APIs serve a bounded window (the EA rainfall API keeps ~4 weeks), so
+    # replacing these partitions would silently discard older history every night.
+    weather_hours = merge_weather_hours([*existing_dataset.weather_hours, *fresh_weather_hours])
+    rain_readings = merge_rain_readings([*existing_dataset.rain_readings, *fresh_rain_readings])
     write_curated_dataset(
         dataset_dir=curated_dataset_dir,
         sensor_readings=merged_sensor_readings,
@@ -139,6 +143,20 @@ def curate_accepted_email_csvs(
         weather_hour_count=len(weather_hours),
         rain_reading_count=len(rain_readings),
     )
+
+
+def merge_weather_hours(weather_hours: list[WeatherHour]) -> list[WeatherHour]:
+    hours_by_timestamp: dict[datetime, WeatherHour] = {
+        weather_hour.timestamp: weather_hour for weather_hour in weather_hours
+    }
+    return sorted(hours_by_timestamp.values(), key=lambda weather_hour: weather_hour.timestamp)
+
+
+def merge_rain_readings(readings: list[RainReading]) -> list[RainReading]:
+    readings_by_timestamp: dict[datetime, RainReading] = {
+        reading.timestamp: reading for reading in readings
+    }
+    return sorted(readings_by_timestamp.values(), key=lambda reading: reading.timestamp)
 
 
 def merge_sensor_readings(readings: list[SensorReading]) -> list[SensorReading]:

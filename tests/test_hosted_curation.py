@@ -11,6 +11,8 @@ from basement_analysis.curated_dataset import load_curated_dataset, write_curate
 from basement_analysis.hosted_curation import (
     accepted_csv_object_keys,
     curate_accepted_email_csvs,
+    merge_rain_readings,
+    merge_weather_hours,
 )
 from basement_analysis.summaries import (
     Event,
@@ -36,8 +38,7 @@ def sensor_reading(
     )
 
 
-def weather_hour(raw_timestamp: str) -> WeatherHour:
-    temperature_c = 16.0
+def weather_hour(raw_timestamp: str, temperature_c: float = 16.0) -> WeatherHour:
     relative_humidity_pct = 70.0
     return WeatherHour(
         timestamp=datetime.fromisoformat(raw_timestamp),
@@ -108,8 +109,14 @@ def test_curate_accepted_email_csvs_merges_existing_parquet_and_staged_csvs(
             sensor_reading("2026-07-04T00:00:00", "Thermo-hygrometer_3", 20.0, 58.0),
         ],
         events=[Event(datetime.fromisoformat("2026-07-02T21:00:00"), "Dehumidifier on")],
-        weather_hours=[weather_hour("2026-07-03T00:00:00")],
-        rain_readings=[RainReading(datetime.fromisoformat("2026-07-03T00:00:00"), 0.0)],
+        weather_hours=[
+            weather_hour("2026-06-01T00:00:00"),
+            weather_hour("2026-07-03T00:00:00", temperature_c=16.0),
+        ],
+        rain_readings=[
+            RainReading(datetime.fromisoformat("2026-06-01T00:00:00"), 1.5),
+            RainReading(datetime.fromisoformat("2026-07-03T00:00:00"), 0.0),
+        ],
     )
 
     object_store_dir = tmp_path / "objects"
@@ -137,7 +144,10 @@ def test_curate_accepted_email_csvs_merges_existing_parquet_and_staged_csvs(
         assert end_date == date(2026, 7, 4)
         assert cache_dir == tmp_path / "work" / "cache"
         assert refresh
-        return [weather_hour("2026-07-03T00:00:00"), weather_hour("2026-07-04T00:00:00")]
+        return [
+            weather_hour("2026-07-03T00:00:00", temperature_c=17.5),
+            weather_hour("2026-07-04T00:00:00"),
+        ]
 
     def fake_environment_agency_rainfall(
         start_date: date,
@@ -149,7 +159,10 @@ def test_curate_accepted_email_csvs_merges_existing_parquet_and_staged_csvs(
         assert end_date == date(2026, 7, 4)
         assert cache_dir == tmp_path / "work" / "cache"
         assert refresh
-        return [RainReading(datetime.fromisoformat("2026-07-04T00:00:00"), 0.2)]
+        return [
+            RainReading(datetime.fromisoformat("2026-07-03T00:00:00"), 0.4),
+            RainReading(datetime.fromisoformat("2026-07-04T00:00:00"), 0.2),
+        ]
 
     monkeypatch.setattr(hosted_curation, "fetch_open_meteo_weather", fake_open_meteo_weather)
     monkeypatch.setattr(
@@ -177,6 +190,55 @@ def test_curate_accepted_email_csvs_merges_existing_parquet_and_staged_csvs(
         "Bedroom",
         "Living room",
     }
-    assert curated_dataset.weather_hours[-1].timestamp == datetime.fromisoformat(
-        "2026-07-04T00:00:00"
-    )
+    weather_by_timestamp = {hour.timestamp: hour for hour in curated_dataset.weather_hours}
+    assert sorted(weather_by_timestamp) == [
+        datetime.fromisoformat("2026-06-01T00:00:00"),
+        datetime.fromisoformat("2026-07-03T00:00:00"),
+        datetime.fromisoformat("2026-07-04T00:00:00"),
+    ]
+    assert weather_by_timestamp[datetime.fromisoformat("2026-07-03T00:00:00")].temperature_c == 17.5
+    assert [
+        (reading.timestamp, reading.rainfall_mm) for reading in curated_dataset.rain_readings
+    ] == [
+        (datetime.fromisoformat("2026-06-01T00:00:00"), 1.5),
+        (datetime.fromisoformat("2026-07-03T00:00:00"), 0.4),
+        (datetime.fromisoformat("2026-07-04T00:00:00"), 0.2),
+    ]
+
+
+def test_merge_rain_readings_keeps_old_rows_and_prefers_fresh_on_conflict() -> None:
+    existing = [
+        RainReading(datetime.fromisoformat("2026-06-01T00:00:00"), 1.5),
+        RainReading(datetime.fromisoformat("2026-07-03T00:00:00"), 0.0),
+    ]
+    fresh = [
+        RainReading(datetime.fromisoformat("2026-07-03T00:00:00"), 0.4),
+        RainReading(datetime.fromisoformat("2026-07-04T00:00:00"), 0.2),
+    ]
+
+    merged = merge_rain_readings([*existing, *fresh])
+
+    assert merged == [
+        RainReading(datetime.fromisoformat("2026-06-01T00:00:00"), 1.5),
+        RainReading(datetime.fromisoformat("2026-07-03T00:00:00"), 0.4),
+        RainReading(datetime.fromisoformat("2026-07-04T00:00:00"), 0.2),
+    ]
+
+
+def test_merge_weather_hours_keeps_old_rows_and_prefers_fresh_on_conflict() -> None:
+    existing = [
+        weather_hour("2026-06-01T00:00:00"),
+        weather_hour("2026-07-03T00:00:00", temperature_c=16.0),
+    ]
+    fresh = [
+        weather_hour("2026-07-03T00:00:00", temperature_c=17.5),
+        weather_hour("2026-07-04T00:00:00"),
+    ]
+
+    merged = merge_weather_hours([*existing, *fresh])
+
+    assert [(hour.timestamp, hour.temperature_c) for hour in merged] == [
+        (datetime.fromisoformat("2026-06-01T00:00:00"), 16.0),
+        (datetime.fromisoformat("2026-07-03T00:00:00"), 17.5),
+        (datetime.fromisoformat("2026-07-04T00:00:00"), 16.0),
+    ]
