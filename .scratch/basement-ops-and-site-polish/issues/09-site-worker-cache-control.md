@@ -21,3 +21,9 @@ Note: coordinates with the dashboard toggles ticket (issue 06) — once Email Ad
 is off, the Worker's `etag` header becomes visible and conditional requests start working; the
 `Cache-Control` chosen here should play well with that (e.g. `max-age` + revalidation rather than
 `immutable`).
+
+## Comments
+
+2026-07-08 note from issue 06: the site Worker now sends `Cache-Control: no-transform` so
+Cloudflare preserves the R2 `etag` header at the edge. This ticket still needs to choose and add
+the actual freshness policy; preserve `no-transform` when adding the future `max-age`.

@@ -1,0 +1,6 @@
+- Explain to me where CSVs are converted to Parquet, and what the efficiency of that process is (e.g. is every CSV being re-processed to parquet every time, or just new CSVs which have arrived since last time?)
+- Improve efficiency of processing code across the board, loading minimum required data for each step
+- Add logging or observability to be able to know which parts are running slowest
+- Explain the architecture in Mermaid diagram(s)
+- Make the site have a cool design, 3D model of the basement as a black background with green mesh model of the dehumidifer and other key room elements (or something less cliche)
+- Assess the infra deployment and see if any values should be moved to environment variables (like robjhornby.com - prefer to avoid spreading that throughout the repo)

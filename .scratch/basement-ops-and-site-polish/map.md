@@ -59,6 +59,25 @@ Standing preferences and constraints:
   hosted curation now merges rain/weather partitions (fresh rows win by timestamp) instead of
   replacing them, and null Open-Meteo hours are dropped rather than coerced to 0.0; verified
   against live R2 that pre-API-window rain history survives the nightly run.
+- [Pipeline hygiene sweep](issues/02-pipeline-hygiene-sweep.md) — stale `site/` objects deleted
+  from `basement-pipeline`; dead `cfat_` token line removed from `.envrc`; workflow actions
+  SHA-pinned and a cron keepalive (Actions-API re-enable each run) added, verified with a green
+  dispatch run and merged as PR #1; surfaced the Node 20 deprecation bump as
+  [ticket 13](issues/13-bump-pinned-actions-node20.md).
+- [Add step-timing observability and a build-info record](issues/03-add-step-timing-observability.md) —
+  curation/build phases now emit timing records and job-summary markdown; hosted builds publish
+  `build-info.json` with freshness, row counts, and timings; PR #2 dispatch run recorded 42s
+  wall-clock with curation timing at 13.285s and site-build timing at 7.617s.
+- [Assess pipeline efficiency from measured timings](issues/04-assess-pipeline-efficiency-from-timings.md) —
+  no optimization ticket is warranted at 42s hosted wall clock / ~21s timed Python phases; keep
+  the full rebuild until timings exceed explicit revisit thresholds.
+- [Assess infra config spread and environment-variable consolidation](issues/05-assess-infra-config-and-env-vars.md) —
+  cross-tool duplication is acceptable where names are frozen or tools cannot share config, but
+  cheap Python constant consolidation and removing the tofu `zone_name` default are worth doing
+  as [ticket 14](issues/14-mechanical-config-consolidation.md).
+- [Apply the Cloudflare dashboard zone-setting fixes](issues/06-cloudflare-dashboard-toggles.md) —
+  Full strict HTTPS, Always Use HTTPS, Email Address Obfuscation off, and proxied `www` are now
+  live; the site Worker also sends `Cache-Control: no-transform` so R2 ETags survive the edge.
 
 ## Not yet specified
 
@@ -66,11 +85,6 @@ Standing preferences and constraints:
   step arrives — can only be specified after the direction grilling and mockup reaction rounds
   ([10](issues/10-grill-site-redesign-direction.md) →
   [12](issues/12-grill-mockup-winner-and-implementation.md)).
-- Whether the efficiency assessment ([04](issues/04-assess-pipeline-efficiency-from-timings.md))
-  spawns real optimization tickets, and which (e.g. partition-level parquet rewrites, skipping
-  unchanged CSV downloads) — depends on what the timings show.
-- Whether the config assessment ([05](issues/05-assess-infra-config-and-env-vars.md)) leads to a
-  mechanical consolidation ticket or concludes the current spread is fine.
 - How data freshness should be surfaced on the site itself (beyond the build-info record) — may
   fold into the redesign.
 
