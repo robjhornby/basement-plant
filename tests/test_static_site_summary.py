@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date, datetime
 from pathlib import Path
 
@@ -52,6 +53,26 @@ def weather_hour(
         rain_mm=0.0,
         absolute_humidity_g_m3=absolute_humidity,
     )
+
+
+def visible_markup(rendered_html: str) -> str:
+    return re.sub(
+        r"<(script|style)\b.*?</\1>",
+        "",
+        rendered_html,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+
+
+def chart_payload(rendered_html: str, title: str) -> dict[str, object]:
+    for raw_payload in re.findall(
+        r'<script type="application/json" id="[^"]+-payload">([^<]+)</script>',
+        rendered_html,
+    ):
+        payload = json.loads(raw_payload)
+        if payload["title"] == title:
+            return payload
+    raise AssertionError(f"No chart payload found for {title!r}")
 
 
 def test_fetch_open_meteo_weather_drops_hours_with_null_values(tmp_path: Path) -> None:
@@ -139,6 +160,41 @@ def test_site_analysis_summary_builds_shared_dashboard_and_report_values() -> No
     assert "event timestamp uncertainty" in summary.period_summaries[-1].comparability_flags
 
 
+def test_sensor_chart_payload_uses_tiered_resolution_and_min_max_bands() -> None:
+    summary = build_site_analysis_summary(
+        sensor_readings=[
+            sensor_reading("2026-05-01T05:34:00", "Basement", 17.0, 80.0),
+            sensor_reading("2026-05-01T05:56:00", "Basement", 17.0, 82.0),
+            sensor_reading("2026-07-02T22:03:00", "Basement", 19.0, 70.0),
+            sensor_reading("2026-07-02T22:08:00", "Basement", 19.0, 74.0),
+            sensor_reading("2026-07-02T22:11:00", "Basement", 19.0, 76.0),
+            sensor_reading("2026-07-02T22:03:00", "Bedroom", 20.0, 60.0),
+            sensor_reading("2026-07-02T22:03:00", "Living room", 21.0, 58.0),
+        ],
+        events=[],
+        weather_hours=[weather_hour("2026-07-02T22:00:00", 17.0, 68.0)],
+        rain_readings=[],
+        generated_at=datetime.fromisoformat("2026-07-05T12:00:00"),
+    )
+
+    raw_sensor_chart = summary.dashboard_charts[2]
+    basement_series = raw_sensor_chart.series[0]
+
+    assert [timestamp for timestamp, _value in basement_series.points] == [
+        datetime.fromisoformat("2026-05-01T05:00:00"),
+        datetime.fromisoformat("2026-07-02T22:00:00"),
+        datetime.fromisoformat("2026-07-02T22:10:00"),
+    ]
+    assert [value for _timestamp, value in basement_series.points] == [81.0, 72.0, 76.0]
+    assert [value for _timestamp, value in basement_series.min_points] == [80.0, 70.0, 76.0]
+    assert [value for _timestamp, value in basement_series.max_points] == [82.0, 74.0, 76.0]
+
+    dashboard_html = render_index_html(summary)
+    raw_payload = chart_payload(dashboard_html, "Raw Sensor Context")
+
+    assert raw_payload["bands"]
+
+
 def test_dashboard_and_report_render_from_shared_summary() -> None:
     sensor_readings = [
         sensor_reading("2026-06-28T15:00:00", "Basement", 18.0, 88.0),
@@ -175,8 +231,34 @@ def test_dashboard_and_report_render_from_shared_summary() -> None:
     assert "Uncertainty Budget" in report_html
     assert "Comparability flags" in report_html
     assert "Compatible with active basement drying" in report_html
+    visible_html = visible_markup(rendered_html).lower()
     for removed_wording in ("local", "prototype", "provisional", "work-in-progress"):
-        assert removed_wording not in rendered_html.lower()
+        assert removed_wording not in visible_html
+
+
+def test_dashboard_renders_self_contained_uplot_charts() -> None:
+    summary = build_site_analysis_summary(
+        sensor_readings=[
+            sensor_reading("2026-06-28T15:00:00", "Basement", 18.0, 88.0),
+            sensor_reading("2026-07-02T22:00:00", "Basement", 19.0, 72.0),
+        ],
+        events=[Event(datetime.fromisoformat("2026-06-28T16:20:00"), "Bare floor exposed")],
+        weather_hours=[weather_hour("2026-07-02T22:00:00", 17.0, 68.0)],
+        rain_readings=[RainReading(datetime.fromisoformat("2026-07-02T22:10:00"), 0.4)],
+        generated_at=datetime.fromisoformat("2026-07-05T12:00:00"),
+    )
+
+    dashboard_html = render_index_html(summary)
+
+    assert "new uPlot(" in dashboard_html
+    assert "uPlot.paths.bars" in dashboard_html
+    assert 'type="application/json"' in dashboard_html
+    assert '"initialWindowSeconds":604800' in dashboard_html
+    assert "<noscript>" in dashboard_html
+    assert "Enable JavaScript to view the interactive chart." in dashboard_html
+    assert '"bands":[' in dashboard_html
+    assert "<svg" not in dashboard_html
+    assert not re.search(r"""<(script|link|img)\b[^>]+(?:src|href)=["']https?://""", dashboard_html)
 
 
 def test_render_site_pages_returns_relative_path_to_html_mapping() -> None:

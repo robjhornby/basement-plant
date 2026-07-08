@@ -44,6 +44,9 @@ Standing preferences and constraints:
 - Interactive plots: vendored uPlot inlined into the generated HTML, data inlined as JSON, no
   build step, no CDN/external requests. The frontend build-step question is deferred to the
   redesign arm.
+- 2026-07-08 queue update: the user wants higher-resolution chart aggregates next after seeing the
+  first interactive zoomed plots, so that work is ticket 09 and the cache-control ticket moved to
+  ticket 15.
 - The dashboard is the design target; the physics report inherits the shell/typography, no
   bespoke treatment.
 - Key review facts: EA rainfall API retains only ~4 weeks (station `270397`); Open-Meteo archive
@@ -81,6 +84,13 @@ Standing preferences and constraints:
 - [Trim frontend text and remove prototype-style language](issues/07-trim-frontend-text-and-language.md) —
   the dashboard now leads with metrics, removes the prototype scope prose, links the physics
   report tersely, and regression-tests against local/prototype/provisional rendered wording.
+- [Replace static SVG charts with vendored uPlot interactive charts](issues/08-interactive-uplot-charts.md) —
+  dashboard and report charts now render as self-contained uPlot canvases with inline JSON, a
+  one-week default range, full-history controls, rain bars, and no external requests.
+- [Increase chart aggregate resolution and show within-window spread](issues/09-increase-chart-aggregate-resolution.md) —
+  sensor-derived dashboard/report charts now use tiered 10-minute recent and hourly historical
+  aggregates with faint min/max bands; compact `<noscript>` fallbacks keep the dashboard at
+  1.14 MB.
 
 ## Not yet specified
 

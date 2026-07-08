@@ -4,7 +4,7 @@ import math
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
@@ -23,6 +23,14 @@ HypothesisName = Literal[
     "Weather-related leaking",
     "Steady-state leaking",
 ]
+AggregatedMetricName = Literal[
+    "temperature_c",
+    "relative_humidity_pct",
+    "absolute_humidity_g_m3",
+]
+SENSOR_CHART_RECENT_DAYS = 31
+SENSOR_CHART_RECENT_BUCKET_MINUTES = 10
+SENSOR_CHART_HISTORICAL_BUCKET_MINUTES = 60
 
 
 @dataclass(frozen=True)
@@ -62,8 +70,14 @@ class AggregatedReading:
     timestamp: datetime
     location: str
     temperature_c: float
+    min_temperature_c: float
+    max_temperature_c: float
     relative_humidity_pct: float
+    min_relative_humidity_pct: float
+    max_relative_humidity_pct: float
     absolute_humidity_g_m3: float
+    min_absolute_humidity_g_m3: float
+    max_absolute_humidity_g_m3: float
 
 
 @dataclass(frozen=True)
@@ -113,6 +127,8 @@ class ChartSeries:
     name: str
     color: str
     points: tuple[tuple[datetime, float], ...]
+    min_points: tuple[tuple[datetime, float], ...] = ()
+    max_points: tuple[tuple[datetime, float], ...] = ()
     caveat_ids: tuple[str, ...] = ()
 
 
@@ -206,7 +222,10 @@ def build_site_analysis_summary(
             rain_readings=rain_readings,
         )
     )
-    hourly_sensors = aggregate_sensor_readings(sensor_readings, bucket_minutes=60)
+    chart_sensors = aggregate_sensor_readings_for_chart(
+        sensor_readings,
+        recent_start=dataset_end - timedelta(days=SENSOR_CHART_RECENT_DAYS),
+    )
     daily_basement = daily_basement_points(basement_readings)
     weather_points = tuple(
         (weather_hour.timestamp, weather_hour.absolute_humidity_g_m3)
@@ -244,7 +263,23 @@ def build_site_analysis_summary(
             ChartSeries(
                 name="Basement absolute humidity",
                 color="#1f766f",
-                points=tuple(series_points(hourly_sensors, "Basement", "absolute_humidity_g_m3")),
+                points=tuple(series_points(chart_sensors, "Basement", "absolute_humidity_g_m3")),
+                min_points=tuple(
+                    series_points(
+                        chart_sensors,
+                        "Basement",
+                        "absolute_humidity_g_m3",
+                        statistic="min",
+                    )
+                ),
+                max_points=tuple(
+                    series_points(
+                        chart_sensors,
+                        "Basement",
+                        "absolute_humidity_g_m3",
+                        statistic="max",
+                    )
+                ),
             ),
             ChartSeries(
                 name="Outdoor absolute humidity",
@@ -263,17 +298,65 @@ def build_site_analysis_summary(
             ChartSeries(
                 name="Basement RH",
                 color="#1f766f",
-                points=tuple(series_points(hourly_sensors, "Basement", "relative_humidity_pct")),
+                points=tuple(series_points(chart_sensors, "Basement", "relative_humidity_pct")),
+                min_points=tuple(
+                    series_points(
+                        chart_sensors,
+                        "Basement",
+                        "relative_humidity_pct",
+                        statistic="min",
+                    )
+                ),
+                max_points=tuple(
+                    series_points(
+                        chart_sensors,
+                        "Basement",
+                        "relative_humidity_pct",
+                        statistic="max",
+                    )
+                ),
             ),
             ChartSeries(
                 name="Bedroom RH",
                 color="#8b5cf6",
-                points=tuple(series_points(hourly_sensors, "Bedroom", "relative_humidity_pct")),
+                points=tuple(series_points(chart_sensors, "Bedroom", "relative_humidity_pct")),
+                min_points=tuple(
+                    series_points(
+                        chart_sensors,
+                        "Bedroom",
+                        "relative_humidity_pct",
+                        statistic="min",
+                    )
+                ),
+                max_points=tuple(
+                    series_points(
+                        chart_sensors,
+                        "Bedroom",
+                        "relative_humidity_pct",
+                        statistic="max",
+                    )
+                ),
             ),
             ChartSeries(
                 name="Living room RH",
                 color="#c2410c",
-                points=tuple(series_points(hourly_sensors, "Living room", "relative_humidity_pct")),
+                points=tuple(series_points(chart_sensors, "Living room", "relative_humidity_pct")),
+                min_points=tuple(
+                    series_points(
+                        chart_sensors,
+                        "Living room",
+                        "relative_humidity_pct",
+                        statistic="min",
+                    )
+                ),
+                max_points=tuple(
+                    series_points(
+                        chart_sensors,
+                        "Living room",
+                        "relative_humidity_pct",
+                        statistic="max",
+                    )
+                ),
             ),
         ),
         caveat_ids=("sensor_placement_artifact",),
@@ -333,23 +416,54 @@ def aggregate_sensor_readings(
 
     aggregated: list[AggregatedReading] = []
     for (location, timestamp), bucket_readings in grouped.items():
-        count = len(bucket_readings)
-        aggregated.append(
-            AggregatedReading(
-                timestamp=timestamp,
-                location=location,
-                temperature_c=sum(reading.temperature_c for reading in bucket_readings) / count,
-                relative_humidity_pct=sum(
-                    reading.relative_humidity_pct for reading in bucket_readings
-                )
-                / count,
-                absolute_humidity_g_m3=sum(
-                    reading.absolute_humidity_g_m3 for reading in bucket_readings
-                )
-                / count,
-            )
-        )
+        aggregated.append(build_aggregated_reading(location, timestamp, bucket_readings))
     return sorted(aggregated, key=lambda reading: (reading.location, reading.timestamp))
+
+
+def aggregate_sensor_readings_for_chart(
+    readings: Iterable[SensorReading],
+    recent_start: datetime,
+    recent_bucket_minutes: int = SENSOR_CHART_RECENT_BUCKET_MINUTES,
+    historical_bucket_minutes: int = SENSOR_CHART_HISTORICAL_BUCKET_MINUTES,
+) -> list[AggregatedReading]:
+    grouped: dict[tuple[str, datetime], list[SensorReading]] = defaultdict(list)
+    for reading in readings:
+        bucket_minutes = (
+            recent_bucket_minutes
+            if reading.timestamp >= recent_start
+            else historical_bucket_minutes
+        )
+        grouped[(reading.location, floor_time(reading.timestamp, bucket_minutes))].append(reading)
+
+    aggregated = [
+        build_aggregated_reading(location, timestamp, bucket_readings)
+        for (location, timestamp), bucket_readings in grouped.items()
+    ]
+    return sorted(aggregated, key=lambda reading: (reading.location, reading.timestamp))
+
+
+def build_aggregated_reading(
+    location: str,
+    timestamp: datetime,
+    readings: Sequence[SensorReading],
+) -> AggregatedReading:
+    count = len(readings)
+    temperatures = [reading.temperature_c for reading in readings]
+    relative_humidities = [reading.relative_humidity_pct for reading in readings]
+    absolute_humidities = [reading.absolute_humidity_g_m3 for reading in readings]
+    return AggregatedReading(
+        timestamp=timestamp,
+        location=location,
+        temperature_c=sum(temperatures) / count,
+        min_temperature_c=min(temperatures),
+        max_temperature_c=max(temperatures),
+        relative_humidity_pct=sum(relative_humidities) / count,
+        min_relative_humidity_pct=min(relative_humidities),
+        max_relative_humidity_pct=max(relative_humidities),
+        absolute_humidity_g_m3=sum(absolute_humidities) / count,
+        min_absolute_humidity_g_m3=min(absolute_humidities),
+        max_absolute_humidity_g_m3=max(absolute_humidities),
+    )
 
 
 def build_periods(
@@ -449,22 +563,34 @@ def mean_or_none(values: Iterable[float]) -> float | None:
 def series_points(
     readings: Sequence[AggregatedReading],
     location: str,
-    value_name: str,
+    value_name: AggregatedMetricName,
+    statistic: Literal["mean", "min", "max"] = "mean",
 ) -> list[tuple[datetime, float]]:
     points: list[tuple[datetime, float]] = []
     for reading in readings:
         if reading.location != location:
             continue
-        if value_name == "relative_humidity_pct":
-            value = reading.relative_humidity_pct
-        elif value_name == "absolute_humidity_g_m3":
-            value = reading.absolute_humidity_g_m3
-        elif value_name == "temperature_c":
-            value = reading.temperature_c
-        else:
-            raise ValueError(f"Unknown reading value {value_name!r}")
-        points.append((reading.timestamp, value))
+        points.append((reading.timestamp, aggregated_reading_value(reading, value_name, statistic)))
     return points
+
+
+def aggregated_reading_value(
+    reading: AggregatedReading,
+    value_name: AggregatedMetricName,
+    statistic: Literal["mean", "min", "max"],
+) -> float:
+    value_by_name: dict[tuple[AggregatedMetricName, Literal["mean", "min", "max"]], float] = {
+        ("temperature_c", "mean"): reading.temperature_c,
+        ("temperature_c", "min"): reading.min_temperature_c,
+        ("temperature_c", "max"): reading.max_temperature_c,
+        ("relative_humidity_pct", "mean"): reading.relative_humidity_pct,
+        ("relative_humidity_pct", "min"): reading.min_relative_humidity_pct,
+        ("relative_humidity_pct", "max"): reading.max_relative_humidity_pct,
+        ("absolute_humidity_g_m3", "mean"): reading.absolute_humidity_g_m3,
+        ("absolute_humidity_g_m3", "min"): reading.min_absolute_humidity_g_m3,
+        ("absolute_humidity_g_m3", "max"): reading.max_absolute_humidity_g_m3,
+    }
+    return value_by_name[(value_name, statistic)]
 
 
 def daily_basement_points(readings: Sequence[SensorReading]) -> list[AggregatedReading]:
@@ -475,18 +601,11 @@ def daily_basement_points(readings: Sequence[SensorReading]) -> list[AggregatedR
     aggregated: list[AggregatedReading] = []
     for day, day_readings in grouped.items():
         timestamp = datetime.combine(day, datetime.min.time())
-        count = len(day_readings)
         aggregated.append(
-            AggregatedReading(
-                timestamp=timestamp,
+            build_aggregated_reading(
                 location="Basement",
-                temperature_c=sum(reading.temperature_c for reading in day_readings) / count,
-                relative_humidity_pct=sum(reading.relative_humidity_pct for reading in day_readings)
-                / count,
-                absolute_humidity_g_m3=sum(
-                    reading.absolute_humidity_g_m3 for reading in day_readings
-                )
-                / count,
+                timestamp=timestamp,
+                readings=day_readings,
             )
         )
     return sorted(aggregated, key=lambda reading: reading.timestamp)

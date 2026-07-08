@@ -2,7 +2,7 @@
 
 Type: grilling
 Parent: ../map.md
-Blocked by: 07, 08, 09
+Blocked by: 07, 08, 09, 15
 
 ## Question
 

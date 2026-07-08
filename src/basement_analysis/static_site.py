@@ -8,6 +8,7 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import cast
 from urllib.parse import urlencode
@@ -39,6 +40,10 @@ CAVERSHAM_LATITUDE = 51.47
 CAVERSHAM_LONGITUDE = -0.97
 LOCAL_TIMEZONE = "Europe/London"
 ENVIRONMENT_AGENCY_RAIN_STATION = "270397"
+LATEST_CHART_WINDOW_SECONDS = 7 * 24 * 60 * 60
+VENDORED_UPLOT_DIR = Path(__file__).parent / "vendor" / "uplot"
+
+type JsonValue = None | bool | int | float | str | list[JsonValue] | dict[str, JsonValue]
 
 SENSOR_FILE_LABELS = {
     "Thermo-hygrometer_Export Data_202601031200_202607031200.csv": "Basement",
@@ -75,6 +80,43 @@ def format_optional_float(value: float | None, digits: int = 2) -> str:
     if value is None or not math.isfinite(value):
         return "n/a"
     return f"{value:.{digits}f}"
+
+
+def slugify_identifier(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return slug or "chart"
+
+
+@lru_cache(maxsize=1)
+def load_uplot_javascript() -> str:
+    return (VENDORED_UPLOT_DIR / "uPlot.iife.min.js").read_text(encoding="utf-8")
+
+
+@lru_cache(maxsize=1)
+def load_uplot_css() -> str:
+    return (VENDORED_UPLOT_DIR / "uPlot.min.css").read_text(encoding="utf-8")
+
+
+def render_json_script(script_id: str, payload: Mapping[str, JsonValue]) -> str:
+    serialized_payload = (
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+    )
+    return (
+        f'<script type="application/json" id="{html.escape(script_id)}">'
+        f"{serialized_payload}</script>"
+    )
+
+
+def chart_timestamp_seconds(timestamp: datetime) -> float:
+    local_zone = ZoneInfo(LOCAL_TIMEZONE)
+    aware_timestamp = (
+        timestamp.replace(tzinfo=local_zone)
+        if timestamp.tzinfo is None
+        else timestamp.astimezone(local_zone)
+    )
+    return aware_timestamp.timestamp()
 
 
 def load_sensor_readings(data_dir: Path) -> list[SensorReading]:
@@ -369,15 +411,11 @@ def render_time_series_svg(
 
 
 def render_chart_spec(chart: ChartSpec) -> str:
-    return render_time_series_svg(
-        series=chart.series,
-        events=chart.event_markers,
-        y_label=chart.y_label,
-        height=chart.height,
-    )
+    fallback_html = '<p class="empty">Enable JavaScript to view the interactive chart.</p>'
+    return render_uplot_time_series_chart(chart=chart, fallback_html=fallback_html)
 
 
-def render_rain_svg(rain_chart: RainChartSpec) -> str:
+def render_rain_svg_fallback(rain_chart: RainChartSpec) -> str:
     points = rain_chart.hourly_points
     if not points:
         return '<div class="empty">No Environment Agency rainfall readings available.</div>'
@@ -426,6 +464,540 @@ def render_rain_svg(rain_chart: RainChartSpec) -> str:
         text-anchor="middle">{html.escape(rain_chart.y_label)}</text>
     </svg>
     """
+
+
+def render_rain_chart_spec(rain_chart: RainChartSpec) -> str:
+    fallback_html = '<p class="empty">Enable JavaScript to view the rainfall chart.</p>'
+    return render_uplot_rain_chart(rain_chart=rain_chart, fallback_html=fallback_html)
+
+
+def render_uplot_time_series_chart(chart: ChartSpec, fallback_html: str) -> str:
+    all_timestamps = sorted(
+        {
+            timestamp
+            for chart_series in chart.series
+            for timestamp, _value in (
+                chart_series.points + chart_series.min_points + chart_series.max_points
+            )
+        }
+    )
+    if not all_timestamps:
+        return '<div class="empty">No data available.</div>'
+
+    data: list[JsonValue] = [[chart_timestamp_seconds(timestamp) for timestamp in all_timestamps]]
+    series_payload: list[JsonValue] = []
+    bands_payload: list[JsonValue] = []
+    for chart_series in chart.series:
+        values_by_timestamp = dict(chart_series.points)
+        data.append([values_by_timestamp.get(timestamp) for timestamp in all_timestamps])
+        series_payload.append(
+            {
+                "name": chart_series.name,
+                "color": chart_series.color,
+                "kind": "line",
+                "digits": 2,
+            }
+        )
+        if chart_series.min_points and chart_series.max_points:
+            min_values_by_timestamp = dict(chart_series.min_points)
+            max_values_by_timestamp = dict(chart_series.max_points)
+            bands_payload.append(
+                {
+                    "name": chart_series.name,
+                    "color": chart_series.color,
+                    "lower": [
+                        min_values_by_timestamp.get(timestamp) for timestamp in all_timestamps
+                    ],
+                    "upper": [
+                        max_values_by_timestamp.get(timestamp) for timestamp in all_timestamps
+                    ],
+                }
+            )
+
+    event_payload: list[JsonValue] = [
+        {
+            "timestamp": chart_timestamp_seconds(event.timestamp),
+            "description": event.description,
+        }
+        for event in chart.event_markers
+    ]
+    chart_id = f"chart-{slugify_identifier(chart.title)}"
+    payload: dict[str, JsonValue] = {
+        "id": chart_id,
+        "title": chart.title,
+        "yLabel": chart.y_label,
+        "height": chart.height,
+        "data": data,
+        "series": series_payload,
+        "bands": bands_payload,
+        "events": event_payload,
+        "initialWindowSeconds": LATEST_CHART_WINDOW_SECONDS,
+    }
+    return render_interactive_chart(payload=payload, fallback_html=fallback_html)
+
+
+def render_uplot_rain_chart(rain_chart: RainChartSpec, fallback_html: str) -> str:
+    points = rain_chart.hourly_points
+    if not points:
+        return '<div class="empty">No Environment Agency rainfall readings available.</div>'
+
+    chart_id = f"chart-{slugify_identifier(rain_chart.title)}"
+    payload: dict[str, JsonValue] = {
+        "id": chart_id,
+        "title": rain_chart.title,
+        "yLabel": rain_chart.y_label,
+        "height": rain_chart.height,
+        "data": [
+            [chart_timestamp_seconds(timestamp) for timestamp, _value in points],
+            [value for _timestamp, value in points],
+        ],
+        "series": [
+            {
+                "name": "EA rainfall",
+                "color": "#2563eb",
+                "kind": "bar",
+                "digits": 2,
+            }
+        ],
+        "bands": [],
+        "events": [],
+        "initialWindowSeconds": LATEST_CHART_WINDOW_SECONDS,
+    }
+    return render_interactive_chart(payload=payload, fallback_html=fallback_html)
+
+
+def render_interactive_chart(payload: Mapping[str, JsonValue], fallback_html: str) -> str:
+    chart_id = str(payload["id"])
+    payload_id = f"{chart_id}-payload"
+    chart_height_value = payload["height"]
+    if not isinstance(chart_height_value, int):
+        raise TypeError(f"Chart height must be an integer, got {chart_height_value!r}")
+    chart_title = str(payload["title"])
+    escaped_chart_id = html.escape(chart_id)
+    escaped_payload_id = html.escape(payload_id)
+    return f"""
+    <div class="chart-frame" data-chart-payload="{escaped_payload_id}">
+      <div id="{escaped_chart_id}" class="interactive-chart"
+        style="min-height: {chart_height_value}px" aria-label="{html.escape(chart_title)}">
+      </div>
+      {render_json_script(payload_id, payload)}
+      <noscript>{fallback_html}</noscript>
+    </div>
+    """
+
+
+def render_chart_styles() -> str:
+    return f"""
+    {load_uplot_css()}
+    .chart-frame {{
+      margin-top: 8px;
+    }}
+    .interactive-chart {{
+      width: 100%;
+      min-width: 0;
+    }}
+    .interactive-chart .uplot {{
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      overflow: hidden;
+    }}
+    .interactive-chart .u-over,
+    .interactive-chart .u-under {{
+      border-radius: 8px;
+    }}
+    .interactive-chart .u-title {{
+      display: none;
+    }}
+    .interactive-chart .u-legend {{
+      color: var(--muted);
+      font-size: 12px;
+    }}
+    .interactive-chart .u-legend .u-value {{
+      color: var(--ink);
+      font-variant-numeric: tabular-nums;
+    }}
+    .chart-actions {{
+      display: flex;
+      justify-content: flex-end;
+      gap: 6px;
+      margin: 0 0 6px;
+    }}
+    .chart-actions button {{
+      min-width: 38px;
+      height: 28px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--muted);
+      font: inherit;
+      font-size: 12px;
+      cursor: pointer;
+    }}
+    .chart-actions button[aria-pressed="true"] {{
+      border-color: var(--accent);
+      color: var(--accent);
+      background: #eef7f5;
+    }}
+    .empty {{
+      min-height: 120px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--muted);
+      background: #fbfcfd;
+    }}
+    """
+
+
+def render_chart_runtime_scripts() -> str:
+    return f"""
+  <script>
+{load_uplot_javascript()}
+  </script>
+  <script>
+{CHART_BOOTSTRAP_JAVASCRIPT}
+  </script>
+"""
+
+
+CHART_BOOTSTRAP_JAVASCRIPT = r"""
+(function () {
+  "use strict";
+
+  var latestWindowLabel = "1w";
+  var fullWindowLabel = "All";
+
+  function formatTimestamp(epochSeconds) {
+    if (epochSeconds == null) {
+      return "";
+    }
+    return new Date(epochSeconds * 1000).toLocaleString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+  }
+
+  function formatSeriesValue(value, digits) {
+    return value == null || !Number.isFinite(value) ? "n/a" : value.toFixed(digits);
+  }
+
+  function eventMarkerPlugin(events) {
+    return {
+      hooks: {
+        draw: [
+          function (plot) {
+            if (events.length === 0) {
+              return;
+            }
+            var context = plot.ctx;
+            var top = plot.bbox.top;
+            var bottom = plot.bbox.top + plot.bbox.height;
+            context.save();
+            context.strokeStyle = "rgba(55, 65, 81, 0.45)";
+            context.lineWidth = 1;
+            context.setLineDash([4, 4]);
+            events.forEach(function (event) {
+              var xPosition = plot.valToPos(event.timestamp, "x", true);
+              if (xPosition >= plot.bbox.left && xPosition <= plot.bbox.left + plot.bbox.width) {
+                context.beginPath();
+                context.moveTo(Math.round(xPosition) + 0.5, top);
+                context.lineTo(Math.round(xPosition) + 0.5, bottom);
+                context.stroke();
+              }
+            });
+            context.restore();
+          }
+        ]
+      }
+    };
+  }
+
+  function hexToRgba(color, alpha) {
+    var match = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(color);
+    if (match == null) {
+      return color;
+    }
+    return "rgba(" + [
+      parseInt(match[1], 16),
+      parseInt(match[2], 16),
+      parseInt(match[3], 16),
+      alpha
+    ].join(",") + ")";
+  }
+
+  function rangeBandPlugin(bands, timestamps) {
+    return {
+      hooks: {
+        draw: [
+          function (plot) {
+            if (bands.length === 0) {
+              return;
+            }
+            var context = plot.ctx;
+            var left = plot.bbox.left;
+            var right = plot.bbox.left + plot.bbox.width;
+            context.save();
+            context.globalCompositeOperation = "destination-over";
+            bands.forEach(function (band) {
+              var lowerSegment = [];
+              var isDrawing = false;
+              context.fillStyle = hexToRgba(band.color, 0.14);
+
+              function finishSegment() {
+                if (!isDrawing || lowerSegment.length < 2) {
+                  lowerSegment = [];
+                  isDrawing = false;
+                  return;
+                }
+                for (var index = lowerSegment.length - 1; index >= 0; index -= 1) {
+                  context.lineTo(lowerSegment[index][0], lowerSegment[index][1]);
+                }
+                context.closePath();
+                context.fill();
+                lowerSegment = [];
+                isDrawing = false;
+              }
+
+              timestamps.forEach(function (timestamp, index) {
+                var lower = band.lower[index];
+                var upper = band.upper[index];
+                if (
+                  lower == null ||
+                  upper == null ||
+                  !Number.isFinite(lower) ||
+                  !Number.isFinite(upper)
+                ) {
+                  finishSegment();
+                  return;
+                }
+                var xPosition = plot.valToPos(timestamp, "x", true);
+                if (xPosition < left - 4 || xPosition > right + 4) {
+                  finishSegment();
+                  return;
+                }
+                var upperY = plot.valToPos(upper, "y", true);
+                var lowerY = plot.valToPos(lower, "y", true);
+                if (!isDrawing) {
+                  context.beginPath();
+                  context.moveTo(xPosition, upperY);
+                  isDrawing = true;
+                } else {
+                  context.lineTo(xPosition, upperY);
+                }
+                lowerSegment.push([xPosition, lowerY]);
+              });
+              finishSegment();
+            });
+            context.restore();
+          }
+        ]
+      }
+    };
+  }
+
+  function makeSeriesOptions(payload) {
+    return [
+      {
+        label: "Time",
+        value: function (_plot, value) {
+          return formatTimestamp(value);
+        }
+      }
+    ].concat(payload.series.map(function (series) {
+      var options = {
+        label: series.name,
+        stroke: series.color,
+        fill: series.kind === "bar" ? series.color : undefined,
+        width: series.kind === "bar" ? 0 : 2,
+        points: { show: false },
+        value: function (_plot, value) {
+          return formatSeriesValue(value, series.digits);
+        }
+      };
+      if (series.kind === "bar") {
+        options.paths = uPlot.paths.bars({ size: [0.74, Infinity, 1] });
+      }
+      return options;
+    }));
+  }
+
+  function dataBounds(payload) {
+    var timestamps = payload.data[0];
+    var minimum = timestamps[0];
+    var maximum = timestamps[timestamps.length - 1];
+    return {
+      minimum: minimum,
+      maximum: maximum,
+      latestMinimum: Math.max(minimum, maximum - payload.initialWindowSeconds)
+    };
+  }
+
+  function valueBounds(payload) {
+    var values = [];
+    payload.data.slice(1).forEach(function (seriesValues) {
+      values = values.concat(seriesValues);
+    });
+    (payload.bands || []).forEach(function (band) {
+      values = values.concat(band.lower, band.upper);
+    });
+    var finiteValues = values.filter(function (value) {
+      return value != null && Number.isFinite(value);
+    });
+    if (finiteValues.length === 0) {
+      return { minimum: 0, maximum: 1 };
+    }
+    var minimum = Math.min.apply(null, finiteValues);
+    var maximum = Math.max.apply(null, finiteValues);
+    if (minimum === maximum) {
+      return { minimum: minimum - 1, maximum: maximum + 1 };
+    }
+    var padding = (maximum - minimum) * 0.08;
+    return { minimum: minimum - padding, maximum: maximum + padding };
+  }
+
+  function clampRange(minimum, maximum, bounds) {
+    var span = maximum - minimum;
+    var fullSpan = bounds.maximum - bounds.minimum;
+    if (span >= fullSpan) {
+      return [bounds.minimum, bounds.maximum];
+    }
+    if (minimum < bounds.minimum) {
+      maximum += bounds.minimum - minimum;
+      minimum = bounds.minimum;
+    }
+    if (maximum > bounds.maximum) {
+      minimum -= maximum - bounds.maximum;
+      maximum = bounds.maximum;
+    }
+    return [Math.max(bounds.minimum, minimum), Math.min(bounds.maximum, maximum)];
+  }
+
+  function setRange(plot, minimum, maximum, bounds) {
+    var clampedRange = clampRange(minimum, maximum, bounds);
+    plot.setScale("x", { min: clampedRange[0], max: clampedRange[1] });
+  }
+
+  function addRangeControls(frame, plot, bounds) {
+    var controls = document.createElement("div");
+    controls.className = "chart-actions";
+    var latestButton = document.createElement("button");
+    var fullButton = document.createElement("button");
+    latestButton.type = "button";
+    latestButton.textContent = latestWindowLabel;
+    latestButton.setAttribute("aria-label", "Latest week");
+    latestButton.setAttribute("aria-pressed", "true");
+    fullButton.type = "button";
+    fullButton.textContent = fullWindowLabel;
+    fullButton.setAttribute("aria-label", "Full history");
+    fullButton.setAttribute("aria-pressed", "false");
+    latestButton.addEventListener("click", function () {
+      setRange(plot, bounds.latestMinimum, bounds.maximum, bounds);
+      latestButton.setAttribute("aria-pressed", "true");
+      fullButton.setAttribute("aria-pressed", "false");
+    });
+    fullButton.addEventListener("click", function () {
+      setRange(plot, bounds.minimum, bounds.maximum, bounds);
+      latestButton.setAttribute("aria-pressed", "false");
+      fullButton.setAttribute("aria-pressed", "true");
+    });
+    controls.append(latestButton, fullButton);
+    frame.insertBefore(controls, frame.firstChild);
+  }
+
+  function addWheelNavigation(frame, plot, bounds) {
+    var overlay = frame.querySelector(".u-over");
+    if (overlay == null) {
+      return;
+    }
+    overlay.addEventListener("wheel", function (event) {
+      if (!event.shiftKey && !event.ctrlKey && !event.metaKey) {
+        return;
+      }
+      event.preventDefault();
+      var scale = plot.scales.x;
+      var minimum = scale.min;
+      var maximum = scale.max;
+      var span = maximum - minimum;
+      if (event.shiftKey) {
+        var shift = event.deltaY * span * 0.0015;
+        setRange(plot, minimum + shift, maximum + shift, bounds);
+        return;
+      }
+      var rect = overlay.getBoundingClientRect();
+      var pointerRatio = Math.min(Math.max((event.clientX - rect.left) / rect.width, 0), 1);
+      var anchor = minimum + span * pointerRatio;
+      var factor = event.deltaY > 0 ? 1.2 : 0.82;
+      setRange(
+        plot,
+        anchor - (anchor - minimum) * factor,
+        anchor + (maximum - anchor) * factor,
+        bounds
+      );
+    }, { passive: false });
+  }
+
+  function renderChart(frame) {
+    var payloadScript = document.getElementById(frame.dataset.chartPayload);
+    if (payloadScript == null) {
+      return;
+    }
+    var payload = JSON.parse(payloadScript.textContent);
+    var host = frame.querySelector(".interactive-chart");
+    var bounds = dataBounds(payload);
+    var yBounds = valueBounds(payload);
+    var options = {
+      title: payload.title,
+      width: Math.max(320, host.clientWidth || frame.clientWidth || 720),
+      height: payload.height,
+      scales: {
+        x: { time: true, min: bounds.latestMinimum, max: bounds.maximum }
+      },
+      axes: [
+        {},
+        { label: payload.yLabel, size: 58 }
+      ],
+      cursor: {
+        drag: { x: true, y: false, setScale: true },
+        focus: { prox: 24 }
+      },
+      legend: { show: true, live: true },
+      series: makeSeriesOptions(payload),
+      plugins: [
+        rangeBandPlugin(payload.bands || [], payload.data[0]),
+        eventMarkerPlugin(payload.events)
+      ]
+    };
+    if (payload.series.some(function (series) { return series.kind === "bar"; })) {
+      options.scales.y = { range: function (_plot, minimum, maximum) {
+        return [0, Math.max(1, maximum * 1.12)];
+      } };
+    } else {
+      options.scales.y = { range: function () {
+        return [yBounds.minimum, yBounds.maximum];
+      } };
+    }
+    var plot = new uPlot(options, payload.data, host);
+    addRangeControls(frame, plot, bounds);
+    addWheelNavigation(frame, plot, bounds);
+    if ("ResizeObserver" in window) {
+      new ResizeObserver(function () {
+        plot.setSize({
+          width: Math.max(320, Math.floor(host.clientWidth || frame.clientWidth || 720)),
+          height: payload.height
+        });
+      }).observe(host);
+    }
+  }
+
+  document.querySelectorAll(".chart-frame").forEach(renderChart);
+})();
+"""
 
 
 def render_period_table(summaries: Sequence[PeriodSummary], include_flags: bool = False) -> str:
@@ -511,6 +1083,7 @@ def render_index_html(summary: SiteAnalysisSummary) -> str:
   <title>Basement Dampness</title>
   <link rel="icon" href="data:,">
   <style>
+    {render_chart_styles()}
     :root {{
       color-scheme: light;
       --ink: #18212f;
@@ -659,7 +1232,7 @@ def render_index_html(summary: SiteAnalysisSummary) -> str:
 
     <h2>Basement Versus Outdoor Moisture</h2>
     {humidity_chart}
-    {render_rain_svg(summary.rain_chart)}
+    {render_rain_chart_spec(summary.rain_chart)}
 
     <h2>Raw Sensor Context</h2>
     {raw_sensor_chart}
@@ -667,6 +1240,7 @@ def render_index_html(summary: SiteAnalysisSummary) -> str:
     <h2>Event-Bounded Period Metrics</h2>
     <div class="table-wrap">{render_period_table(summary.period_summaries)}</div>
   </main>
+  {render_chart_runtime_scripts()}
 </body>
 </html>
 """
@@ -732,6 +1306,7 @@ def render_physics_report_html(summary: SiteAnalysisSummary) -> str:
   <title>Basement Physics And Metrology Report</title>
   <link rel="icon" href="data:,">
   <style>
+    {render_chart_styles()}
     :root {{
       color-scheme: light;
       --ink: #18212f;
@@ -859,6 +1434,7 @@ def render_physics_report_html(summary: SiteAnalysisSummary) -> str:
     <h2>Caveats</h2>
     <section class="panel-grid">{render_caveat_list(summary, use_report_text=True)}</section>
   </main>
+  {render_chart_runtime_scripts()}
 </body>
 </html>
 """

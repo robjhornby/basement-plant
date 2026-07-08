@@ -2,6 +2,7 @@
 
 Type: prototype
 Parent: ../map.md
+Status: resolved
 
 ## Question
 
@@ -29,3 +30,34 @@ Resolve when:
 
 This is typed prototype because the first pass should be a cheap look-and-feel check (one chart,
 real data) before converting all charts — but the ticket resolves with the full conversion landed.
+
+## Answer
+
+Resolved with the full conversion landed.
+
+- Vendored uPlot `1.6.32` under `src/basement_analysis/vendor/uplot/` with the MIT license and
+  package metadata; the generated pages inline the vendored CSS/JS and do not request a CDN.
+- Replaced dashboard and report SVG chart rendering with uPlot-backed charts fed by inline JSON
+  payloads. The SVG renderers remain only as cheap `<noscript>` fallbacks.
+- All dashboard time-series charts now render as uPlot canvases with live legends, drag-to-zoom,
+  `1w`/`All` range controls, and modifier-wheel x-axis navigation. The default range is the latest
+  week while full history remains in the page payload.
+- The Environment Agency rainfall chart uses `uPlot.paths.bars`, so the bar-style rain rendering
+  survived the migration.
+- Render tests now assert the self-contained uPlot contract, inline JSON payloads, bar rendering,
+  one-week default configuration, and static fallback presence.
+
+Verification:
+
+- `uv run pytest`
+- `uv run ruff format --check .`
+- `uv run ruff check .`
+- `uv run pyright`
+- `uv run basement --reuse-curated`
+- Browser check via Playwright against `http://localhost:8765/index.html`: four nonblank uPlot
+  canvases, no console errors, request log contained only `index.html`, mobile chart widths fit a
+  390 px viewport, and the `1w`/`All` controls toggled correctly.
+
+Build-size note: the generated dashboard is now about 652 KB with full-history data and vendored
+uPlot inlined; this is acceptable for the current no-build static publishing model and does not
+warrant a frontend build-step ticket before the redesign arm.

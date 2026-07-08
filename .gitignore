@@ -26,3 +26,6 @@ node_modules/
 prototypes/*/.wrangler/
 prototypes/*/curated-data-snapshot/
 .wrangler/
+
+# Playwright
+.playwright-cli/
