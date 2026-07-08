@@ -26,7 +26,7 @@ const realEmailBytes = new TextEncoder().encode(realEmailText);
 function emailMessage(rawBytes: Uint8Array): ForwardableEmailMessage {
   return {
     from: "support@x-sense.com",
-    to: "basement-ingest@robjhornby.com",
+    to: "basement-ingest@example.test",
     headers: new Headers(),
     raw: new Response(rawBytes).body as ReadableStream,
     rawSize: rawBytes.byteLength,
@@ -40,7 +40,7 @@ function syntheticEmail(subject: string, csvBodies: Record<string, string>): Uin
   const boundary = "test-boundary";
   const lines = [
     "From: someone@example.test",
-    "To: basement-ingest@robjhornby.com",
+    "To: basement-ingest@example.test",
     `Subject: ${subject}`,
     "Message-ID: <synthetic-test@example.test>",
     "Date: Sat, 4 Jul 2026 09:00:00 +0000",

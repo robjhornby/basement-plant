@@ -18,10 +18,10 @@ describe("siteObjectKey", () => {
 
 describe("site Worker", () => {
   it("redirects the extensionless base path so relative links stay under /basement/", async () => {
-    const response = await worker.fetch(new Request("https://robjhornby.com/basement"), env);
+    const response = await worker.fetch(new Request("https://example.test/basement"), env);
 
     expect(response.status).toBe(308);
-    expect(response.headers.get("location")).toBe("https://robjhornby.com/basement/");
+    expect(response.headers.get("location")).toBe("https://example.test/basement/");
   });
 
   it("serves the dashboard HTML from R2", async () => {
@@ -29,7 +29,7 @@ describe("site Worker", () => {
       httpMetadata: { contentType: "text/html; charset=utf-8" },
     });
 
-    const response = await worker.fetch(new Request("https://robjhornby.com/basement/"), env);
+    const response = await worker.fetch(new Request("https://example.test/basement/"), env);
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
@@ -43,12 +43,12 @@ describe("site Worker", () => {
       httpMetadata: { contentType: "text/html; charset=utf-8" },
     });
 
-    const firstResponse = await worker.fetch(new Request("https://robjhornby.com/basement/"), env);
+    const firstResponse = await worker.fetch(new Request("https://example.test/basement/"), env);
     const etag = firstResponse.headers.get("etag");
     expect(etag).not.toBeNull();
 
     const revalidation = await worker.fetch(
-      new Request("https://robjhornby.com/basement/", {
+      new Request("https://example.test/basement/", {
         headers: { "if-none-match": etag! },
       }),
       env,
@@ -66,7 +66,7 @@ describe("site Worker", () => {
     });
 
     const response = await worker.fetch(
-      new Request("https://robjhornby.com/basement/", {
+      new Request("https://example.test/basement/", {
         headers: { "if-none-match": '"stale-etag"' },
       }),
       env,
@@ -82,7 +82,7 @@ describe("site Worker", () => {
     });
 
     const response = await worker.fetch(
-      new Request("https://robjhornby.com/basement/physics-report.html"),
+      new Request("https://example.test/basement/physics-report.html"),
       env,
     );
 
@@ -96,7 +96,7 @@ describe("site Worker", () => {
     });
 
     const response = await worker.fetch(
-      new Request("https://robjhornby.com/basement/", { method: "HEAD" }),
+      new Request("https://example.test/basement/", { method: "HEAD" }),
       env,
     );
 
@@ -107,15 +107,15 @@ describe("site Worker", () => {
 
   it("rejects non-GET-or-HEAD requests and unknown paths", async () => {
     const postResponse = await worker.fetch(
-      new Request("https://robjhornby.com/basement/", { method: "POST" }),
+      new Request("https://example.test/basement/", { method: "POST" }),
       env,
     );
     const missingResponse = await worker.fetch(
-      new Request("https://robjhornby.com/basement/raw-emails/message.eml"),
+      new Request("https://example.test/basement/raw-emails/message.eml"),
       env,
     );
     const outsideBasePathResponse = await worker.fetch(
-      new Request("https://robjhornby.com/raw-emails/message.eml"),
+      new Request("https://example.test/raw-emails/message.eml"),
       env,
     );
 

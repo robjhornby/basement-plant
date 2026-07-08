@@ -13,6 +13,7 @@ from basement_analysis.curated_dataset import (
     write_curated_dataset,
 )
 from basement_analysis.summaries import (
+    ENVIRONMENT_AGENCY_RAIN_STATION,
     Event,
     RainReading,
     SensorReading,
@@ -72,8 +73,8 @@ def test_curated_dataset_round_trips_through_partitioned_parquet_and_duckdb(
         "part-00000.parquet"
     ) in relative_paths
     assert (
-        "rain_readings/source=environment_agency/station=270397/year=2026/month=06/"
-        "part-00000.parquet"
+        f"rain_readings/source=environment_agency/station={ENVIRONMENT_AGENCY_RAIN_STATION}/"
+        "year=2026/month=06/part-00000.parquet"
     ) in relative_paths
 
     curated_dataset = load_curated_dataset(dataset_dir)

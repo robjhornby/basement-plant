@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import cast
 
 PARSER_VERSION = "basement_analysis.raw_email_ingest.v1"
+X_SENSE_RAW_OBJECT_KEY_PREFIX = "raw-emails/source=x-sense"
 REQUIRED_SENSOR_COLUMNS = (
     "Time",
     "Temperature_Celsius",
@@ -67,7 +68,7 @@ class IngestState:
 def process_raw_email_batch(
     raw_email_dir: Path,
     object_store_dir: Path,
-    raw_object_key_prefix: str = "raw-emails/source=x-sense",
+    raw_object_key_prefix: str = X_SENSE_RAW_OBJECT_KEY_PREFIX,
 ) -> tuple[EmailIngestResult, ...]:
     """Process local raw emails into an R2-shaped object tree."""
     state = load_ingest_state(object_store_dir)

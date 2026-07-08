@@ -6,7 +6,11 @@ from email.policy import default
 from pathlib import Path
 from typing import cast
 
-from basement_analysis.raw_email_ingest import process_raw_email_batch, sha256_hex
+from basement_analysis.raw_email_ingest import (
+    X_SENSE_RAW_OBJECT_KEY_PREFIX,
+    process_raw_email_batch,
+    sha256_hex,
+)
 
 
 def write_email(
@@ -54,14 +58,14 @@ def test_ingest_emails_writes_r2_style_raw_csv_and_manifest_objects(tmp_path: Pa
     results = process_raw_email_batch(
         raw_email_dir=raw_email_dir,
         object_store_dir=object_store_dir,
-        raw_object_key_prefix="raw-emails/source=x-sense",
+        raw_object_key_prefix=X_SENSE_RAW_OBJECT_KEY_PREFIX,
     )
 
     raw_sha256 = sha256_hex(raw_bytes)
     csv_sha256 = sha256_hex(attachment_bytes)
     assert [result.status for result in results] == ["accepted"]
     assert results[0].raw_object_key == (
-        "raw-emails/source=x-sense/received_date=2026-07-04/sample.eml"
+        f"{X_SENSE_RAW_OBJECT_KEY_PREFIX}/received_date=2026-07-04/sample.eml"
     )
     assert results[0].manifest_object_key == (
         f"manifests/ingest/source=x-sense/received_date=2026-07-04/raw_sha256={raw_sha256}.json"

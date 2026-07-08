@@ -1,9 +1,9 @@
 # Copy to env/production.tfvars (gitignored values welcome) and fill in real IDs.
 account_id = "00000000000000000000000000000000"
 zone_id    = "00000000000000000000000000000000"
+zone_name  = "example.com"
 
 # Defaults shown; override only if the design changes.
-# zone_name                 = "robjhornby.com"
 # pipeline_bucket_name      = "basement-pipeline"
 # site_bucket_name          = "basement-site"
 # r2_location               = "WEUR"

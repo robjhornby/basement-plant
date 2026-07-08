@@ -8,6 +8,8 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
+ENVIRONMENT_AGENCY_RAIN_STATION = "270397"
+
 PERIOD_LABEL_BY_EVENT_TIME = {
     "2026-06-28 12:40": "clearing_in_progress",
     "2026-06-28 16:20": "bare_no_dehumidifier",
@@ -372,7 +374,7 @@ def build_site_analysis_summary(
             sensor_models=("STH51 thermohygrometer",),
             weather_sources=(
                 "Open-Meteo archive hourly weather",
-                "Environment Agency station 270397 rainfall",
+                f"Environment Agency station {ENVIRONMENT_AGENCY_RAIN_STATION} rainfall",
             ),
             event_timeline_source=event_timeline_source,
         ),

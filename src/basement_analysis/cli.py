@@ -17,7 +17,11 @@ from basement_analysis.observability import (
     write_build_info,
     write_command_timing_record,
 )
-from basement_analysis.raw_email_ingest import print_ingest_results, process_raw_email_batch
+from basement_analysis.raw_email_ingest import (
+    X_SENSE_RAW_OBJECT_KEY_PREFIX,
+    print_ingest_results,
+    process_raw_email_batch,
+)
 from basement_analysis.static_site import build_static_site
 
 DEFAULT_TIMINGS_DIR = Path("build/timings")
@@ -138,7 +142,7 @@ def ingest_emails(argv: Sequence[str] | None = None) -> None:
     )
     parser.add_argument(
         "--raw-object-key-prefix",
-        default="raw-emails/source=x-sense",
+        default=X_SENSE_RAW_OBJECT_KEY_PREFIX,
         help=(
             "Object-key prefix prepended to local .eml relative paths. Use an empty string when "
             "--raw-email-dir already points at an object-store root."

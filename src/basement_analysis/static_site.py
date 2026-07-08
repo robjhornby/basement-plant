@@ -23,6 +23,7 @@ from basement_analysis.curated_dataset import (
 )
 from basement_analysis.observability import PhaseRecorder
 from basement_analysis.summaries import (
+    ENVIRONMENT_AGENCY_RAIN_STATION,
     ChartSeries,
     ChartSpec,
     Event,
@@ -39,7 +40,6 @@ from basement_analysis.summaries import (
 CAVERSHAM_LATITUDE = 51.47
 CAVERSHAM_LONGITUDE = -0.97
 LOCAL_TIMEZONE = "Europe/London"
-ENVIRONMENT_AGENCY_RAIN_STATION = "270397"
 LATEST_CHART_WINDOW_SECONDS = 7 * 24 * 60 * 60
 VENDORED_UPLOT_DIR = Path(__file__).parent / "vendor" / "uplot"
 

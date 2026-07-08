@@ -91,6 +91,11 @@ Standing preferences and constraints:
   sensor-derived dashboard/report charts now use tiered 10-minute recent and hourly historical
   aggregates with faint min/max bands; compact `<noscript>` fallbacks keep the dashboard at
   1.14 MB.
+- [Mechanical config consolidation](issues/14-mechanical-config-consolidation.md) — the EA station
+  id and the X-Sense raw-key prefix are now single Python constants (`summaries.py`,
+  `raw_email_ingest.py`) reused by modules and tests; the tofu `zone_name` default is gone
+  (real value in gitignored tfvars, `example.com` placeholder in the example); TS test fixtures
+  use `example.test`, leaving the wrangler route as the only hardcoded domain in code.
 
 ## Not yet specified
 

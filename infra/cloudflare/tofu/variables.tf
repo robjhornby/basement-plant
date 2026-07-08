@@ -4,14 +4,13 @@ variable "account_id" {
 }
 
 variable "zone_id" {
-  description = "Cloudflare zone ID for the email-receiving zone (robjhornby.com)."
+  description = "Cloudflare zone ID for the email-receiving zone."
   type        = string
 }
 
 variable "zone_name" {
   description = "Zone apex domain used to build the ingest email address."
   type        = string
-  default     = "robjhornby.com"
 }
 
 variable "pipeline_bucket_name" {

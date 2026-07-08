@@ -12,7 +12,13 @@ from typing import cast
 import duckdb
 import polars as pl
 
-from basement_analysis.summaries import Event, RainReading, SensorReading, WeatherHour
+from basement_analysis.summaries import (
+    ENVIRONMENT_AGENCY_RAIN_STATION,
+    Event,
+    RainReading,
+    SensorReading,
+    WeatherHour,
+)
 
 # A curated dataset root is either a local directory or an `s3://bucket/prefix` URL that
 # DuckDB reads directly (R2 via its S3-compatible endpoint).
@@ -74,7 +80,12 @@ def write_curated_dataset(
     )
     write_partitioned_parquet(
         frame=rain_frame(rain_readings),
-        base_path=dataset_dir / "rain_readings" / "source=environment_agency" / "station=270397",
+        base_path=(
+            dataset_dir
+            / "rain_readings"
+            / "source=environment_agency"
+            / f"station={ENVIRONMENT_AGENCY_RAIN_STATION}"
+        ),
         partition_columns=("year", "month"),
     )
     return tuple(sorted(dataset_dir.glob("**/*.parquet")))
