@@ -687,6 +687,25 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
     return value == null || !Number.isFinite(value) ? "n/a" : value.toFixed(digits);
   }
 
+  function normalizeLineGaps(payload) {
+    payload.series.forEach(function (series, seriesIndex) {
+      if (series.kind !== "line") {
+        return;
+      }
+      payload.data[seriesIndex + 1] = payload.data[seriesIndex + 1].map(function (value) {
+        return value === null ? undefined : value;
+      });
+    });
+    (payload.bands || []).forEach(function (band) {
+      band.lower = band.lower.map(function (value) {
+        return value === null ? undefined : value;
+      });
+      band.upper = band.upper.map(function (value) {
+        return value === null ? undefined : value;
+      });
+    });
+  }
+
   function eventMarkerPlugin(events) {
     return {
       hooks: {
@@ -767,9 +786,12 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
               timestamps.forEach(function (timestamp, index) {
                 var lower = band.lower[index];
                 var upper = band.upper[index];
+                if (lower === undefined || upper === undefined) {
+                  return;
+                }
                 if (
-                  lower == null ||
-                  upper == null ||
+                  lower === null ||
+                  upper === null ||
                   !Number.isFinite(lower) ||
                   !Number.isFinite(upper)
                 ) {
@@ -948,6 +970,7 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
       return;
     }
     var payload = JSON.parse(payloadScript.textContent);
+    normalizeLineGaps(payload);
     var host = frame.querySelector(".interactive-chart");
     var bounds = dataBounds(payload);
     var yBounds = valueBounds(payload);

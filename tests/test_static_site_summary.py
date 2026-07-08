@@ -4,6 +4,7 @@ import json
 import re
 from datetime import date, datetime
 from pathlib import Path
+from typing import cast
 
 from basement_analysis.static_site import (
     fetch_open_meteo_weather,
@@ -193,6 +194,42 @@ def test_sensor_chart_payload_uses_tiered_resolution_and_min_max_bands() -> None
     raw_payload = chart_payload(dashboard_html, "Raw Sensor Context")
 
     assert raw_payload["bands"]
+
+
+def test_line_chart_runtime_spans_mixed_cadence_alignment_gaps() -> None:
+    summary = build_site_analysis_summary(
+        sensor_readings=[
+            sensor_reading("2026-07-02T22:03:00", "Basement", 19.0, 70.0),
+            sensor_reading("2026-07-02T22:13:00", "Basement", 19.0, 76.0),
+            sensor_reading("2026-07-02T22:03:00", "Bedroom", 20.0, 60.0),
+            sensor_reading("2026-07-02T22:03:00", "Living room", 21.0, 58.0),
+        ],
+        events=[],
+        weather_hours=[
+            weather_hour("2026-07-02T22:00:00", 17.0, 68.0),
+            weather_hour("2026-07-02T23:00:00", 17.5, 69.0),
+        ],
+        rain_readings=[],
+        generated_at=datetime.fromisoformat("2026-07-05T12:00:00"),
+    )
+
+    dashboard_html = render_index_html(summary)
+    moisture_payload = chart_payload(dashboard_html, "Basement Versus Outdoor Moisture")
+    moisture_data = cast(list[list[float | None]], moisture_payload["data"])
+    outdoor_values = moisture_data[2]
+    first_weather_value = weather_hour(
+        "2026-07-02T22:00:00",
+        17.0,
+        68.0,
+    ).absolute_humidity_g_m3
+    second_weather_value = weather_hour(
+        "2026-07-02T23:00:00",
+        17.5,
+        69.0,
+    ).absolute_humidity_g_m3
+
+    assert outdoor_values == [first_weather_value, None, second_weather_value]
+    assert "normalizeLineGaps(payload);" in dashboard_html
 
 
 def test_dashboard_and_report_render_from_shared_summary() -> None:
