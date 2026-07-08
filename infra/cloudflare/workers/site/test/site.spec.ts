@@ -33,8 +33,46 @@ describe("site Worker", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
-    expect(response.headers.get("cache-control")).toBe("no-transform");
+    expect(response.headers.get("cache-control")).toBe("public, max-age=600, no-transform");
     expect(response.headers.get("etag")).not.toBeNull();
+    expect(await response.text()).toContain("Dashboard");
+  });
+
+  it("answers a matching If-None-Match with a bodyless 304", async () => {
+    await env.SITE_BUCKET.put("index.html", "<!doctype html><h1>Dashboard</h1>", {
+      httpMetadata: { contentType: "text/html; charset=utf-8" },
+    });
+
+    const firstResponse = await worker.fetch(new Request("https://robjhornby.com/basement/"), env);
+    const etag = firstResponse.headers.get("etag");
+    expect(etag).not.toBeNull();
+
+    const revalidation = await worker.fetch(
+      new Request("https://robjhornby.com/basement/", {
+        headers: { "if-none-match": etag! },
+      }),
+      env,
+    );
+
+    expect(revalidation.status).toBe(304);
+    expect(revalidation.headers.get("etag")).toBe(etag);
+    expect(revalidation.headers.get("cache-control")).toBe("public, max-age=600, no-transform");
+    expect(await revalidation.text()).toBe("");
+  });
+
+  it("serves the full body when If-None-Match does not match", async () => {
+    await env.SITE_BUCKET.put("index.html", "<!doctype html><h1>Dashboard</h1>", {
+      httpMetadata: { contentType: "text/html; charset=utf-8" },
+    });
+
+    const response = await worker.fetch(
+      new Request("https://robjhornby.com/basement/", {
+        headers: { "if-none-match": '"stale-etag"' },
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
     expect(await response.text()).toContain("Dashboard");
   });
 
