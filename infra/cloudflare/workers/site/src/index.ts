@@ -1,4 +1,6 @@
-const SITE_OBJECT_KEYS = new Set(["index.html", "physics-report.html"]);
+const SITE_OBJECT_KEYS = new Set(["index.html"]);
+const ASSET_OBJECT_KEY_PATTERN =
+  /^assets\/frutiger-aero\/(?:(?:tall-scene-(?:960|1440|2048)|floor-strip|dehumidifier|goldfish|dragonfly)\.webp|manifest\.json)$/;
 const SITE_BASE_PATH = "/basement";
 
 export function siteObjectKey(pathname: string): string | null {
@@ -10,7 +12,10 @@ export function siteObjectKey(pathname: string): string | null {
   }
 
   const pathKey = pathname.slice(SITE_BASE_PATH.length + 1);
-  return SITE_OBJECT_KEYS.has(pathKey) ? pathKey : null;
+  if (SITE_OBJECT_KEYS.has(pathKey)) {
+    return pathKey;
+  }
+  return ASSET_OBJECT_KEY_PATTERN.test(pathKey) ? pathKey : null;
 }
 
 function trailingSlashRedirect(request: Request): Response | null {

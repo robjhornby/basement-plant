@@ -86,6 +86,14 @@ def build_site(argv: Sequence[str] | None = None) -> None:
         default=DEFAULT_TIMINGS_DIR,
         help="Directory where per-command phase-timing JSON records are written and read.",
     )
+    parser.add_argument(
+        "--include-private-report",
+        action="store_true",
+        help=(
+            "Also write physics-report.html for local private analysis. This page is not part "
+            "of the hosted public site."
+        ),
+    )
     args = parser.parse_args(argv)
 
     recorder = PhaseRecorder()
@@ -96,6 +104,7 @@ def build_site(argv: Sequence[str] | None = None) -> None:
         curated_dataset_dir=args.curated_data_dir,
         rebuild_curated_dataset=not bool(args.reuse_curated),
         phase_recorder=recorder,
+        include_private_report=bool(args.include_private_report),
     )
     site_counts = {
         "sensor_row_count": result.sensor_row_count,
@@ -116,7 +125,8 @@ def build_site(argv: Sequence[str] | None = None) -> None:
     )
 
     print(f"Wrote {result.index_path}")
-    print(f"Wrote {result.report_path}")
+    if result.private_report_path is not None:
+        print(f"Wrote {result.private_report_path}")
     print(f"Wrote {build_info_path}")
     print(f"Curated data: {result.curated_dataset_dir}")
     print(f"Sensor rows: {result.sensor_row_count:,}")

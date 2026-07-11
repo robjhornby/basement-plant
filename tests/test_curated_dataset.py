@@ -156,7 +156,8 @@ def test_static_site_builds_from_curated_parquet_path(
     )
 
     assert result.index_path.exists()
-    assert result.report_path.exists()
+    assert result.private_report_path is None
+    assert not (tmp_path / "site" / "physics-report.html").exists()
     assert result.sensor_row_count == 4
     assert result.weather_hour_count == 2
     assert isinstance(result.curated_dataset_dir, Path)
@@ -192,3 +193,69 @@ def test_build_static_site_rejects_rebuilding_into_s3_location(tmp_path: Path) -
             output_dir=tmp_path / "site",
             curated_dataset_dir="s3://bucket/parquet",
         )
+
+
+def test_build_static_site_can_write_private_report_for_local_analysis(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "Thermo-hygrometer_Export Data_202601031200_202607031200.csv").write_text(
+        "\n".join(
+            [
+                "Time,Temperature_Celsius,Relative Humidity_Percent",
+                "2026/06/28 15:00,18.0,88.0",
+                "2026/07/02 22:00,19.0,72.0",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (data_dir / "basement_events.csv").write_text(
+        "Time,Event\n2026/06/28 16:20,Bare floor exposed",
+        encoding="utf-8",
+    )
+
+    def fake_open_meteo_weather(
+        start_date: date,
+        end_date: date,
+        cache_dir: Path,
+        refresh: bool,
+    ) -> list[WeatherHour]:
+        assert start_date == date(2026, 6, 28)
+        assert end_date == date(2026, 7, 2)
+        assert cache_dir.name == "cache"
+        assert not refresh
+        return [weather_hour("2026-07-02T22:00:00")]
+
+    def fake_environment_agency_rainfall(
+        start_date: date,
+        end_date: date,
+        cache_dir: Path,
+        refresh: bool,
+    ) -> list[RainReading]:
+        assert start_date == date(2026, 6, 28)
+        assert end_date == date(2026, 7, 2)
+        assert cache_dir.name == "cache"
+        assert not refresh
+        return [RainReading(datetime.fromisoformat("2026-07-02T22:10:00"), 0.4)]
+
+    monkeypatch.setattr(static_site, "fetch_open_meteo_weather", fake_open_meteo_weather)
+    monkeypatch.setattr(
+        static_site,
+        "fetch_environment_agency_rainfall",
+        fake_environment_agency_rainfall,
+    )
+
+    result = static_site.build_static_site(
+        data_dir=data_dir,
+        output_dir=tmp_path / "site",
+        curated_dataset_dir=tmp_path / "curated-data",
+        include_private_report=True,
+    )
+
+    assert result.index_path.exists()
+    assert result.private_report_path == tmp_path / "site" / "physics-report.html"
+    private_report_path = result.private_report_path
+    assert private_report_path is not None
+    assert private_report_path.exists()

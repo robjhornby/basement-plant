@@ -92,8 +92,19 @@ jobs:
           AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
         run: |
           aws s3 sync build/gha-site/site "s3://$R2_SITE_BUCKET" \
-            --exclude '*' --include 'index.html' --include 'physics-report.html' \
+            --exclude '*' --include 'index.html' \
             --content-type 'text/html; charset=utf-8' \
+            --endpoint-url "$R2_ENDPOINT_URL" --no-progress
+          aws s3 sync build/gha-site/site/assets/frutiger-aero \
+            "s3://$R2_SITE_BUCKET/assets/frutiger-aero" \
+            --exclude '*' --include '*.webp' \
+            --content-type 'image/webp' \
+            --cache-control 'public, max-age=600, no-transform' \
+            --endpoint-url "$R2_ENDPOINT_URL" --no-progress
+          aws s3 cp build/gha-site/site/assets/frutiger-aero/manifest.json \
+            "s3://$R2_SITE_BUCKET/assets/frutiger-aero/manifest.json" \
+            --content-type 'application/json; charset=utf-8' \
+            --cache-control 'public, max-age=600, no-transform' \
             --endpoint-url "$R2_ENDPOINT_URL" --no-progress
           aws s3 cp build/gha-site/site/build-info.json "s3://$R2_SITE_BUCKET/build-info.json" \
             --content-type 'application/json; charset=utf-8' \

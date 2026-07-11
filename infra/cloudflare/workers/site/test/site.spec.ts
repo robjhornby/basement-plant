@@ -7,10 +7,18 @@ describe("siteObjectKey", () => {
   it("maps only the known publication paths", () => {
     expect(siteObjectKey("/basement/")).toBe("index.html");
     expect(siteObjectKey("/basement/index.html")).toBe("index.html");
-    expect(siteObjectKey("/basement/physics-report.html")).toBe("physics-report.html");
+    expect(siteObjectKey("/basement/assets/frutiger-aero/tall-scene-1440.webp")).toBe(
+      "assets/frutiger-aero/tall-scene-1440.webp",
+    );
+    expect(siteObjectKey("/basement/assets/frutiger-aero/manifest.json")).toBe(
+      "assets/frutiger-aero/manifest.json",
+    );
+    expect(siteObjectKey("/basement/physics-report.html")).toBeNull();
     expect(siteObjectKey("/")).toBeNull();
     expect(siteObjectKey("/basement")).toBeNull();
     expect(siteObjectKey("/basement/cache/open_meteo.json")).toBeNull();
+    expect(siteObjectKey("/basement/assets/frutiger-aero/tall-scene-source.webp")).toBeNull();
+    expect(siteObjectKey("/basement/assets/frutiger-aero/../manifest.json")).toBeNull();
     expect(siteObjectKey("/basement/../index.html")).toBeNull();
     expect(siteObjectKey("/basement-other/physics-report.html")).toBeNull();
   });
@@ -76,7 +84,7 @@ describe("site Worker", () => {
     expect(await response.text()).toContain("Dashboard");
   });
 
-  it("serves the physics report HTML from R2", async () => {
+  it("does not serve a stale physics report object from R2", async () => {
     await env.SITE_BUCKET.put("physics-report.html", "<!doctype html><h1>Physics</h1>", {
       httpMetadata: { contentType: "text/html; charset=utf-8" },
     });
@@ -86,8 +94,24 @@ describe("site Worker", () => {
       env,
     );
 
+    expect(response.status).toBe(404);
+    expect(await response.text()).toBe("Not found");
+  });
+
+  it("serves same-origin production image assets from R2", async () => {
+    await env.SITE_BUCKET.put("assets/frutiger-aero/tall-scene-1440.webp", new Uint8Array([1, 2]), {
+      httpMetadata: { contentType: "image/webp" },
+    });
+
+    const response = await worker.fetch(
+      new Request("https://example.test/basement/assets/frutiger-aero/tall-scene-1440.webp"),
+      env,
+    );
+
     expect(response.status).toBe(200);
-    expect(await response.text()).toContain("Physics");
+    expect(response.headers.get("content-type")).toBe("image/webp");
+    expect(response.headers.get("cache-control")).toBe("public, max-age=600, no-transform");
+    expect((await response.arrayBuffer()).byteLength).toBe(2);
   });
 
   it("supports HEAD requests for smoke tests", async () => {

@@ -133,6 +133,14 @@ Standing preferences and constraints:
   the Python static-site renderer with same-origin assets, responsive derivatives from the
   upscaled tall scene, the no-shadow dehumidifier, a four-chart final lineup, mobile chart
   interaction hardening, public report unpublishing, and a final verify/deploy gate.
+- [Production Frutiger Aero asset pipeline](issues/17-production-frutiger-aero-asset-pipeline.md) —
+  the production build now owns the final Frutiger Aero source art, generates responsive WebP
+  derivatives plus a manifest, packages those sources, uploads the generated assets to R2, and
+  serves only the allowed same-origin asset paths through the site Worker.
+- [Unpublish public physics report](issues/21-unpublish-public-physics-report.md) — the hosted
+  public site now publishes and serves only the dashboard plus allowed same-origin assets; the
+  report route is 404, stale R2 `physics-report.html` cleanup was executed once and verified, and
+  local private report rendering remains opt-in via `--include-private-report`.
 
 ## Not yet specified
 
