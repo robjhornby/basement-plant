@@ -160,8 +160,83 @@ def test_site_analysis_summary_builds_shared_dashboard_and_report_values() -> No
     assert summary.rain_chart.hourly_points == (
         (datetime.fromisoformat("2026-07-02T22:00:00"), 1.0),
     )
-    assert summary.dashboard_charts[0].title == "Daily Basement Trends"
+    assert [chart.title for chart in summary.dashboard_charts] == [
+        "Basement conditions",
+        "Absolute humidity",
+        "Temperature",
+        "Relative humidity",
+    ]
     assert "event timestamp uncertainty" in summary.period_summaries[-1].comparability_flags
+
+
+def test_dashboard_chart_payload_matches_final_redesign_lineup() -> None:
+    summary = build_site_analysis_summary(
+        sensor_readings=[
+            sensor_reading("2026-07-02T22:03:00", "Basement", 19.0, 70.0),
+            sensor_reading("2026-07-02T22:03:00", "Bedroom", 20.0, 60.0),
+            sensor_reading("2026-07-02T22:03:00", "Living room", 21.0, 58.0),
+        ],
+        events=[],
+        weather_hours=[weather_hour("2026-07-02T22:00:00", 17.0, 68.0)],
+        rain_readings=[RainReading(datetime.fromisoformat("2026-07-02T22:10:00"), 0.4)],
+        generated_at=datetime.fromisoformat("2026-07-05T12:00:00"),
+    )
+
+    dashboard_html = render_index_html(summary)
+    payloads = [
+        chart_payload(dashboard_html, title)
+        for title in (
+            "Basement conditions",
+            "Absolute humidity",
+            "Temperature",
+            "Relative humidity",
+        )
+    ]
+    series_by_title = {
+        str(payload["title"]): [
+            str(series["name"]) for series in cast(list[dict[str, object]], payload["series"])
+        ]
+        for payload in payloads
+    }
+    absolute_humidity_payload = chart_payload(dashboard_html, "Absolute humidity")
+    absolute_humidity_series = cast(list[dict[str, object]], absolute_humidity_payload["series"])
+    rain_series = absolute_humidity_series[-1]
+    axes = cast(list[dict[str, object]], absolute_humidity_payload["axes"])
+
+    assert series_by_title == {
+        "Basement conditions": ["Basement relative humidity", "Basement temperature"],
+        "Absolute humidity": [
+            "Basement absolute humidity",
+            "Bedroom absolute humidity",
+            "Living room absolute humidity",
+            "Outdoor absolute humidity",
+            "Rainfall",
+        ],
+        "Temperature": [
+            "Basement temperature",
+            "Bedroom temperature",
+            "Living room temperature",
+            "Outdoor temperature",
+        ],
+        "Relative humidity": [
+            "Basement relative humidity",
+            "Bedroom relative humidity",
+            "Living room relative humidity",
+            "Outdoor relative humidity",
+        ],
+    }
+    assert all(series["unit"] for series in absolute_humidity_series)
+    assert rain_series["kind"] == "bar"
+    assert rain_series["scale"] == "rain"
+    assert rain_series["unit"] == "mm"
+    assert axes == [
+        {"scale": "y", "label": "Absolute humidity (g/m3)", "show": True, "size": 58},
+        {"scale": "rain", "label": "", "show": False, "size": 0},
+    ]
+    assert "Daily Basement Trends" not in dashboard_html
+    assert "Basement Versus Outdoor Moisture" not in dashboard_html
+    assert "Raw Sensor Context" not in dashboard_html
+    assert "formatSeriesValueWithUnit(value, series)" in dashboard_html
 
 
 def test_sensor_chart_payload_uses_tiered_resolution_and_min_max_bands() -> None:
@@ -181,8 +256,8 @@ def test_sensor_chart_payload_uses_tiered_resolution_and_min_max_bands() -> None
         generated_at=datetime.fromisoformat("2026-07-05T12:00:00"),
     )
 
-    raw_sensor_chart = summary.dashboard_charts[2]
-    basement_series = raw_sensor_chart.series[0]
+    relative_humidity_chart = summary.dashboard_charts[3]
+    basement_series = relative_humidity_chart.series[0]
 
     assert [timestamp for timestamp, _value in basement_series.points] == [
         datetime.fromisoformat("2026-05-01T05:00:00"),
@@ -194,7 +269,7 @@ def test_sensor_chart_payload_uses_tiered_resolution_and_min_max_bands() -> None
     assert [value for _timestamp, value in basement_series.max_points] == [82.0, 74.0, 76.0]
 
     dashboard_html = render_index_html(summary)
-    raw_payload = chart_payload(dashboard_html, "Raw Sensor Context")
+    raw_payload = chart_payload(dashboard_html, "Relative humidity")
 
     assert raw_payload["bands"]
 
@@ -217,9 +292,9 @@ def test_line_chart_runtime_spans_mixed_cadence_alignment_gaps() -> None:
     )
 
     dashboard_html = render_index_html(summary)
-    moisture_payload = chart_payload(dashboard_html, "Basement Versus Outdoor Moisture")
+    moisture_payload = chart_payload(dashboard_html, "Absolute humidity")
     moisture_data = cast(list[list[float | None]], moisture_payload["data"])
-    outdoor_values = moisture_data[2]
+    outdoor_values = moisture_data[4]
     first_weather_value = weather_hour(
         "2026-07-02T22:00:00",
         17.0,
@@ -264,7 +339,19 @@ def test_dashboard_and_report_render_from_shared_summary() -> None:
     assert dashboard_html.index("Latest basement sample") < dashboard_html.index(
         "Hypothesis Evidence"
     )
-    assert "Basement Versus Outdoor Moisture" in dashboard_html
+    for chart_title in (
+        "Basement conditions",
+        "Absolute humidity",
+        "Temperature",
+        "Relative humidity",
+    ):
+        assert chart_title in dashboard_html
+    for old_chart_title in (
+        "Daily Basement Trends",
+        "Basement Versus Outdoor Moisture",
+        "Raw Sensor Context",
+    ):
+        assert old_chart_title not in dashboard_html
     assert "Compatible with active basement drying" in dashboard_html
     assert "Prototype scope" not in dashboard_html
     assert 'href="index.html"' in report_html

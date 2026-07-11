@@ -30,6 +30,7 @@ AggregatedMetricName = Literal[
     "relative_humidity_pct",
     "absolute_humidity_g_m3",
 ]
+ChartSeriesKind = Literal["line", "bar"]
 SENSOR_CHART_RECENT_DAYS = 31
 SENSOR_CHART_RECENT_BUCKET_MINUTES = 10
 SENSOR_CHART_HISTORICAL_BUCKET_MINUTES = 60
@@ -132,6 +133,9 @@ class ChartSeries:
     min_points: tuple[tuple[datetime, float], ...] = ()
     max_points: tuple[tuple[datetime, float], ...] = ()
     caveat_ids: tuple[str, ...] = ()
+    unit: str = ""
+    kind: ChartSeriesKind = "line"
+    scale: str = "y"
 
 
 @dataclass(frozen=True)
@@ -228,38 +232,64 @@ def build_site_analysis_summary(
         sensor_readings,
         recent_start=dataset_end - timedelta(days=SENSOR_CHART_RECENT_DAYS),
     )
-    daily_basement = daily_basement_points(basement_readings)
-    weather_points = tuple(
+    rain_chart = build_rain_chart(rain_readings)
+    outdoor_absolute_humidity_points = tuple(
         (weather_hour.timestamp, weather_hour.absolute_humidity_g_m3)
         for weather_hour in weather_hours
     )
+    outdoor_temperature_points = tuple(
+        (weather_hour.timestamp, weather_hour.temperature_c) for weather_hour in weather_hours
+    )
+    outdoor_relative_humidity_points = tuple(
+        (weather_hour.timestamp, weather_hour.relative_humidity_pct)
+        for weather_hour in weather_hours
+    )
+    rain_points = rain_chart.hourly_points
 
-    daily_chart = ChartSpec(
-        title="Daily Basement Trends",
-        y_label="Daily values",
-        height=280,
+    basement_conditions_chart = ChartSpec(
+        title="Basement conditions",
+        y_label="Basement relative humidity (%) and temperature (C)",
         event_markers=tuple(events),
         series=(
             ChartSeries(
-                name="Daily basement RH",
+                name="Basement relative humidity",
                 color="#1f766f",
-                points=tuple(
-                    (reading.timestamp, reading.relative_humidity_pct) for reading in daily_basement
+                points=tuple(series_points(chart_sensors, "Basement", "relative_humidity_pct")),
+                min_points=tuple(
+                    series_points(
+                        chart_sensors,
+                        "Basement",
+                        "relative_humidity_pct",
+                        statistic="min",
+                    )
                 ),
+                max_points=tuple(
+                    series_points(
+                        chart_sensors,
+                        "Basement",
+                        "relative_humidity_pct",
+                        statistic="max",
+                    )
+                ),
+                unit="%",
             ),
             ChartSeries(
-                name="Daily basement absolute humidity",
-                color="#8b5cf6",
-                points=tuple(
-                    (reading.timestamp, reading.absolute_humidity_g_m3)
-                    for reading in daily_basement
+                name="Basement temperature",
+                color="#c2410c",
+                points=tuple(series_points(chart_sensors, "Basement", "temperature_c")),
+                min_points=tuple(
+                    series_points(chart_sensors, "Basement", "temperature_c", statistic="min")
                 ),
+                max_points=tuple(
+                    series_points(chart_sensors, "Basement", "temperature_c", statistic="max")
+                ),
+                unit="C",
             ),
         ),
     )
-    moisture_chart = ChartSpec(
-        title="Basement Versus Outdoor Moisture",
-        y_label="Absolute humidity g/m3",
+    absolute_humidity_chart = ChartSpec(
+        title="Absolute humidity",
+        y_label="Absolute humidity (g/m3)",
         event_markers=tuple(events),
         series=(
             ChartSeries(
@@ -282,23 +312,141 @@ def build_site_analysis_summary(
                         statistic="max",
                     )
                 ),
+                unit="g/m3",
+            ),
+            ChartSeries(
+                name="Bedroom absolute humidity",
+                color="#8b5cf6",
+                points=tuple(series_points(chart_sensors, "Bedroom", "absolute_humidity_g_m3")),
+                min_points=tuple(
+                    series_points(
+                        chart_sensors,
+                        "Bedroom",
+                        "absolute_humidity_g_m3",
+                        statistic="min",
+                    )
+                ),
+                max_points=tuple(
+                    series_points(
+                        chart_sensors,
+                        "Bedroom",
+                        "absolute_humidity_g_m3",
+                        statistic="max",
+                    )
+                ),
+                unit="g/m3",
+            ),
+            ChartSeries(
+                name="Living room absolute humidity",
+                color="#c2410c",
+                points=tuple(
+                    series_points(chart_sensors, "Living room", "absolute_humidity_g_m3")
+                ),
+                min_points=tuple(
+                    series_points(
+                        chart_sensors,
+                        "Living room",
+                        "absolute_humidity_g_m3",
+                        statistic="min",
+                    )
+                ),
+                max_points=tuple(
+                    series_points(
+                        chart_sensors,
+                        "Living room",
+                        "absolute_humidity_g_m3",
+                        statistic="max",
+                    )
+                ),
+                unit="g/m3",
             ),
             ChartSeries(
                 name="Outdoor absolute humidity",
                 color="#2563eb",
-                points=weather_points,
+                points=outdoor_absolute_humidity_points,
                 caveat_ids=("weather_source_mismatch",),
+                unit="g/m3",
+            ),
+            ChartSeries(
+                name="Rainfall",
+                color="#2563eb",
+                points=rain_points,
+                caveat_ids=("weather_source_mismatch",),
+                unit="mm",
+                kind="bar",
+                scale="rain",
             ),
         ),
         caveat_ids=("weather_source_mismatch",),
     )
-    raw_sensor_chart = ChartSpec(
-        title="Raw Sensor Context",
-        y_label="Relative humidity %",
+    temperature_chart = ChartSpec(
+        title="Temperature",
+        y_label="Temperature (C)",
         event_markers=tuple(events),
         series=(
             ChartSeries(
-                name="Basement RH",
+                name="Basement temperature",
+                color="#1f766f",
+                points=tuple(series_points(chart_sensors, "Basement", "temperature_c")),
+                min_points=tuple(
+                    series_points(chart_sensors, "Basement", "temperature_c", statistic="min")
+                ),
+                max_points=tuple(
+                    series_points(chart_sensors, "Basement", "temperature_c", statistic="max")
+                ),
+                unit="C",
+            ),
+            ChartSeries(
+                name="Bedroom temperature",
+                color="#8b5cf6",
+                points=tuple(series_points(chart_sensors, "Bedroom", "temperature_c")),
+                min_points=tuple(
+                    series_points(chart_sensors, "Bedroom", "temperature_c", statistic="min")
+                ),
+                max_points=tuple(
+                    series_points(chart_sensors, "Bedroom", "temperature_c", statistic="max")
+                ),
+                unit="C",
+            ),
+            ChartSeries(
+                name="Living room temperature",
+                color="#c2410c",
+                points=tuple(series_points(chart_sensors, "Living room", "temperature_c")),
+                min_points=tuple(
+                    series_points(
+                        chart_sensors,
+                        "Living room",
+                        "temperature_c",
+                        statistic="min",
+                    )
+                ),
+                max_points=tuple(
+                    series_points(
+                        chart_sensors,
+                        "Living room",
+                        "temperature_c",
+                        statistic="max",
+                    )
+                ),
+                unit="C",
+            ),
+            ChartSeries(
+                name="Outdoor temperature",
+                color="#2563eb",
+                points=outdoor_temperature_points,
+                caveat_ids=("weather_source_mismatch",),
+                unit="C",
+            ),
+        ),
+        caveat_ids=("weather_source_mismatch",),
+    )
+    relative_humidity_chart = ChartSpec(
+        title="Relative humidity",
+        y_label="Relative humidity (%)",
+        event_markers=tuple(events),
+        series=(
+            ChartSeries(
+                name="Basement relative humidity",
                 color="#1f766f",
                 points=tuple(series_points(chart_sensors, "Basement", "relative_humidity_pct")),
                 min_points=tuple(
@@ -317,9 +465,10 @@ def build_site_analysis_summary(
                         statistic="max",
                     )
                 ),
+                unit="%",
             ),
             ChartSeries(
-                name="Bedroom RH",
+                name="Bedroom relative humidity",
                 color="#8b5cf6",
                 points=tuple(series_points(chart_sensors, "Bedroom", "relative_humidity_pct")),
                 min_points=tuple(
@@ -338,9 +487,10 @@ def build_site_analysis_summary(
                         statistic="max",
                     )
                 ),
+                unit="%",
             ),
             ChartSeries(
-                name="Living room RH",
+                name="Living room relative humidity",
                 color="#c2410c",
                 points=tuple(series_points(chart_sensors, "Living room", "relative_humidity_pct")),
                 min_points=tuple(
@@ -359,11 +509,25 @@ def build_site_analysis_summary(
                         statistic="max",
                     )
                 ),
+                unit="%",
+            ),
+            ChartSeries(
+                name="Outdoor relative humidity",
+                color="#2563eb",
+                points=outdoor_relative_humidity_points,
+                caveat_ids=("weather_source_mismatch",),
+                unit="%",
             ),
         ),
-        caveat_ids=("sensor_placement_artifact",),
+        caveat_ids=("weather_source_mismatch", "sensor_placement_artifact"),
     )
 
+    dashboard_charts = (
+        basement_conditions_chart,
+        absolute_humidity_chart,
+        temperature_chart,
+        relative_humidity_chart,
+    )
     return SiteAnalysisSummary(
         metadata=SiteMetadata(
             generated_at=generated_at or datetime.now(),
@@ -380,9 +544,9 @@ def build_site_analysis_summary(
         ),
         metric_cards=build_metric_cards(sensor_readings, weather_hours, rain_readings),
         period_summaries=period_summaries,
-        dashboard_charts=(daily_chart, moisture_chart, raw_sensor_chart),
-        report_charts=(moisture_chart, daily_chart),
-        rain_chart=build_rain_chart(rain_readings),
+        dashboard_charts=dashboard_charts,
+        report_charts=dashboard_charts,
+        rain_chart=rain_chart,
         hypotheses=build_hypothesis_assessments(period_summaries),
         caveats=build_caveats(),
         uncertainty_budget=build_uncertainty_budget(),

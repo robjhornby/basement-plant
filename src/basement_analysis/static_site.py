@@ -517,7 +517,9 @@ def render_uplot_time_series_chart(chart: ChartSpec, fallback_html: str) -> str:
             {
                 "name": chart_series.name,
                 "color": chart_series.color,
-                "kind": "line",
+                "kind": chart_series.kind,
+                "unit": chart_series.unit,
+                "scale": chart_series.scale,
                 "digits": 2,
             }
         )
@@ -528,6 +530,7 @@ def render_uplot_time_series_chart(chart: ChartSpec, fallback_html: str) -> str:
                 {
                     "name": chart_series.name,
                     "color": chart_series.color,
+                    "scale": chart_series.scale,
                     "lower": [
                         min_values_by_timestamp.get(timestamp) for timestamp in all_timestamps
                     ],
@@ -549,6 +552,15 @@ def render_uplot_time_series_chart(chart: ChartSpec, fallback_html: str) -> str:
         "id": chart_id,
         "title": chart.title,
         "yLabel": chart.y_label,
+        "axes": [
+            {"scale": "y", "label": chart.y_label, "show": True, "size": 58},
+            *[
+                {"scale": scale, "label": "", "show": False, "size": 0}
+                for scale in sorted(
+                    {series.scale for series in chart.series if series.scale != "y"}
+                )
+            ],
+        ],
         "height": chart.height,
         "data": data,
         "series": series_payload,
@@ -579,9 +591,12 @@ def render_uplot_rain_chart(rain_chart: RainChartSpec, fallback_html: str) -> st
                 "name": "EA rainfall",
                 "color": "#2563eb",
                 "kind": "bar",
+                "unit": "mm",
+                "scale": "y",
                 "digits": 2,
             }
         ],
+        "axes": [{"scale": "y", "label": rain_chart.y_label, "show": True, "size": 58}],
         "bands": [],
         "events": [],
         "initialWindowSeconds": LATEST_CHART_WINDOW_SECONDS,
@@ -708,6 +723,14 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
 
   function formatSeriesValue(value, digits) {
     return value == null || !Number.isFinite(value) ? "n/a" : value.toFixed(digits);
+  }
+
+  function formatSeriesValueWithUnit(value, series) {
+    var formattedValue = formatSeriesValue(value, series.digits);
+    if (formattedValue === "n/a" || !series.unit) {
+      return formattedValue;
+    }
+    return formattedValue + " " + series.unit;
   }
 
   function normalizeLineGaps(payload) {
@@ -860,9 +883,10 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
         stroke: series.color,
         fill: series.kind === "bar" ? series.color : undefined,
         width: series.kind === "bar" ? 0 : 2,
+        scale: series.scale || "y",
         points: { show: false },
         value: function (_plot, value) {
-          return formatSeriesValue(value, series.digits);
+          return formatSeriesValueWithUnit(value, series);
         }
       };
       if (series.kind === "bar") {
@@ -883,13 +907,17 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
     };
   }
 
-  function valueBounds(payload) {
+  function scaleValueBounds(payload, scaleKey) {
     var values = [];
-    payload.data.slice(1).forEach(function (seriesValues) {
-      values = values.concat(seriesValues);
+    payload.series.forEach(function (series, seriesIndex) {
+      if ((series.scale || "y") === scaleKey) {
+        values = values.concat(payload.data[seriesIndex + 1]);
+      }
     });
     (payload.bands || []).forEach(function (band) {
-      values = values.concat(band.lower, band.upper);
+      if ((band.scale || "y") === scaleKey) {
+        values = values.concat(band.lower, band.upper);
+      }
     });
     var finiteValues = values.filter(function (value) {
       return value != null && Number.isFinite(value);
@@ -904,6 +932,48 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
     }
     var padding = (maximum - minimum) * 0.08;
     return { minimum: minimum - padding, maximum: maximum + padding };
+  }
+
+  function scaleHasBars(payload, scaleKey) {
+    return payload.series.some(function (series) {
+      return (series.scale || "y") === scaleKey && series.kind === "bar";
+    });
+  }
+
+  function makeScales(payload, bounds) {
+    var scales = {
+      x: { time: true, min: bounds.latestMinimum, max: bounds.maximum }
+    };
+    (payload.axes || [{ scale: "y" }]).forEach(function (axis) {
+      var scaleKey = axis.scale || "y";
+      var valueBounds = scaleValueBounds(payload, scaleKey);
+      if (scaleHasBars(payload, scaleKey)) {
+        scales[scaleKey] = { range: function (_plot, _minimum, maximum) {
+          return [0, Math.max(1, maximum * 1.12)];
+        } };
+        return;
+      }
+      scales[scaleKey] = { range: function () {
+        return [valueBounds.minimum, valueBounds.maximum];
+      } };
+    });
+    return scales;
+  }
+
+  function makeAxes(payload) {
+    return [{}].concat((payload.axes || [{ scale: "y", label: payload.yLabel }]).map(
+      function (axis) {
+        return {
+          scale: axis.scale || "y",
+          label: axis.label || "",
+          show: axis.show !== false,
+          size: axis.show === false ? 0 : (axis.size || 58),
+          values: axis.show === false ? function () { return []; } : undefined,
+          ticks: axis.show === false ? { show: false } : undefined,
+          grid: axis.show === false ? { show: false } : undefined
+        };
+      }
+    ));
   }
 
   function clampRange(minimum, maximum, bounds) {
@@ -996,18 +1066,12 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
     normalizeLineGaps(payload);
     var host = frame.querySelector(".interactive-chart");
     var bounds = dataBounds(payload);
-    var yBounds = valueBounds(payload);
     var options = {
       title: payload.title,
       width: Math.max(320, host.clientWidth || frame.clientWidth || 720),
       height: payload.height,
-      scales: {
-        x: { time: true, min: bounds.latestMinimum, max: bounds.maximum }
-      },
-      axes: [
-        {},
-        { label: payload.yLabel, size: 58 }
-      ],
+      scales: makeScales(payload, bounds),
+      axes: makeAxes(payload),
       cursor: {
         drag: { x: true, y: false, setScale: true },
         focus: { prox: 24 }
@@ -1019,15 +1083,6 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
         eventMarkerPlugin(payload.events)
       ]
     };
-    if (payload.series.some(function (series) { return series.kind === "bar"; })) {
-      options.scales.y = { range: function (_plot, minimum, maximum) {
-        return [0, Math.max(1, maximum * 1.12)];
-      } };
-    } else {
-      options.scales.y = { range: function () {
-        return [yBounds.minimum, yBounds.maximum];
-      } };
-    }
     var plot = new uPlot(options, payload.data, host);
     addRangeControls(frame, plot, bounds);
     addWheelNavigation(frame, plot, bounds);
@@ -1116,10 +1171,10 @@ def render_index_html(summary: SiteAnalysisSummary) -> str:
     cards_html = "\n".join(
         render_metric_card(card.label, card.value) for card in summary.metric_cards
     )
-    charts_by_title = {chart.title: chart for chart in summary.dashboard_charts}
-    daily_chart = render_chart_spec(charts_by_title["Daily Basement Trends"])
-    humidity_chart = render_chart_spec(charts_by_title["Basement Versus Outdoor Moisture"])
-    raw_sensor_chart = render_chart_spec(charts_by_title["Raw Sensor Context"])
+    charts_html = "\n".join(
+        f"<h2>{html.escape(chart.title)}</h2>\n{render_chart_spec(chart)}"
+        for chart in summary.dashboard_charts
+    )
     generated_at = format_timestamp(summary.metadata.generated_at)
     return f"""<!doctype html>
 <html lang="en">
@@ -1267,15 +1322,7 @@ def render_index_html(summary: SiteAnalysisSummary) -> str:
     <h2>Hypothesis Evidence</h2>
     <section class="panel-grid">{render_hypothesis_panel(summary)}</section>
 
-    <h2>Daily Basement Trends</h2>
-    {daily_chart}
-
-    <h2>Basement Versus Outdoor Moisture</h2>
-    {humidity_chart}
-    {render_rain_chart_spec(summary.rain_chart)}
-
-    <h2>Raw Sensor Context</h2>
-    {raw_sensor_chart}
+    {charts_html}
 
     <h2>Event-Bounded Period Metrics</h2>
     <div class="table-wrap">{render_period_table(summary.period_summaries)}</div>

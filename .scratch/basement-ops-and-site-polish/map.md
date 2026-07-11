@@ -141,6 +141,11 @@ Standing preferences and constraints:
   public site now publishes and serves only the dashboard plus allowed same-origin assets; the
   report route is 404, stale R2 `physics-report.html` cleanup was executed once and verified, and
   local private report rendering remains opt-in via `--include-private-report`.
+- [Reshape dashboard chart lineup for redesign](issues/18-reshape-dashboard-chart-lineup-for-redesign.md) —
+  the production dashboard chart contract now emits the four final redesign charts in order
+  (basement conditions, absolute humidity with hoverable hidden-scale rainfall, temperature,
+  relative humidity) with per-series units and focused coverage for titles, series membership,
+  units, rain-axis suppression, aggregation bands, and mixed-cadence gaps.
 
 ## Not yet specified
 
