@@ -1,6 +1,7 @@
 # Verify and deploy Frutiger Aero redesign
 
 Type: task
+Status: claimed
 Parent: ../map.md
 Blocked by: 19, 20, 21
 

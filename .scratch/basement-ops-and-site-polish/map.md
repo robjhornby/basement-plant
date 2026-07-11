@@ -146,6 +146,17 @@ Standing preferences and constraints:
   (basement conditions, absolute humidity with hoverable hidden-scale rainfall, temperature,
   relative humidity) with per-series units and focused coverage for titles, series membership,
   units, rain-axis suppression, aggregation bands, and mixed-cadence gaps.
+- [Port Frutiger Aero redesign render](issues/19-port-frutiger-aero-redesign-render.md) —
+  reopened after screenshot review and re-resolved: production now ports the accepted Frutiger
+  Aero prototype details, including full-page floor/dehumidifier positioning, decorative layers,
+  Aero chart styling, same-origin theme assets, footer-only freshness/sources, and no old
+  metric/hypothesis/period/report-link sections.
+
+- [Add mobile touch chart interactions](issues/20-add-mobile-touch-chart-interactions.md) — the
+  shared chart runtime now supports one-finger scrub/tap value reading and two-finger pinch
+  zoom/pan, with `touch-action: pan-y` keeping page scroll with the browser; desktop hover,
+  wheel zoom/pan, drag-select, and range buttons verified unchanged via a 19-check Playwright
+  run at 1440x900 and 390x844 ([script](assets/ticket-20-verify-touch.mjs)).
 
 ## Not yet specified
 
