@@ -108,7 +108,18 @@ Standing preferences and constraints:
 - [Prototype redesign mockups](issues/11-prototype-redesign-mockups.md) — three skins built
   over real data; instrument panel and Frutiger Aero survive ("fantastic"), spring/wet moss
   dropped; reaction round also amended the page spec: hover values carry units and the room
-  comparison splits into three single-measure charts (five charts total).
+  comparison splits into three single-measure charts (five charts total). Round 2
+  (re-resolved 2026-07-11) built the extreme descent skin — sky → shoreline → waterline →
+  underwater, orb readouts, water-styled charts — over the five final ChatGPT assets;
+  User's reactions ask for composition rework (one tall scene image, fold-first layout,
+  simpler underwater, possible basement nod), captured as
+  [Refine the extreme aero descent](issues/16-refine-extreme-aero-descent.md).
+- [Refine the extreme aero descent](issues/16-refine-extreme-aero-descent.md) — round 3
+  accepted and **Frutiger Aero declared the winner**: one tall scene image (sky → hills →
+  waterline pinned at 92vh) replaces the stitched scene, fold-first layout with all five
+  charts starting just below the fold, gradient + bubbles below the water, concrete floor +
+  keyed CGI dehumidifier as the basement nod (brick walls generated but rejected); desktop
+  sun crop accepted; five keeper assets, palettes re-validated, instrument page untouched.
 - [Grill the site redesign direction](issues/10-grill-site-redesign-direction.md) — 3D is mood
   not spec; three mockup candidates (instrument panel, spring/wet-moss, Frutiger Aero) over one
   fixed page spec: "Watch a basement dry" title, hero readouts + three charts (basement
@@ -117,15 +128,15 @@ Standing preferences and constraints:
   metric cards/hypothesis panels/period table; physics report off the web; no build step,
   same-origin image assets allowed; mobile touch zoom/scrub required; no unexplained
   abbreviations.
+- [Grill the mockup winner and implementation shape](issues/12-grill-mockup-winner-and-implementation.md) —
+  round-3 Frutiger Aero wins without instrument-panel visual hybridization; production stays in
+  the Python static-site renderer with same-origin assets, responsive derivatives from the
+  upscaled tall scene, the no-shadow dehumidifier, a four-chart final lineup, mobile chart
+  interaction hardening, public report unpublishing, and a final verify/deploy gate.
 
 ## Not yet specified
 
-- Redesign implementation tickets — what gets built and in what pieces — can only be specified
-  after the mockup reaction round and the winner grill
-  ([Prototype redesign mockups](issues/11-prototype-redesign-mockups.md) →
-  [Grill the mockup winner and implementation shape](issues/12-grill-mockup-winner-and-implementation.md)).
-  The build-step question is already settled (none arrives); freshness display is already
-  settled (footer line).
+None.
 
 ## Out of scope
 

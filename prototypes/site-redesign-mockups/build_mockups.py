@@ -1,22 +1,27 @@
 # pyright: basic
 """PROTOTYPE — throwaway. Generate the themed redesign mockup HTML pages.
 
-Reads payloads.json (build_payloads.py output) plus the vendored uPlot assets and
-writes instrument-panel.html and frutiger-aero.html next to this script (the
-spring/wet-moss candidate was dropped after the 2026-07-09 reaction round).
-Run from the repo root:
+Reads payloads.json (build_payloads.py output), the vendored uPlot assets, and the
+derived WebP art in assets/derived/ (process_assets.py output), then writes
+instrument-panel.html and frutiger-aero.html next to this script.
+
+The aero page is the round-2 "extreme Frutiger Aero" build: the background scrolls
+with the page and descends sky -> ground -> waterline -> underwater (see
+EXTREME-AERO-PLAN.md). Run from the repo root:
 
     uv run python prototypes/site-redesign-mockups/build_mockups.py
 """
 
 from __future__ import annotations
 
+import base64
 import json
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[1]
 VENDOR = REPO_ROOT / "src" / "basement_analysis" / "vendor" / "uplot"
+DERIVED = HERE / "assets" / "derived"
 
 PAGE_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
@@ -38,6 +43,9 @@ body {
   font-family: var(--body-font);
 }
 .page { position: relative; z-index: 2; max-width: 1060px; margin: 0 auto; padding: 28px 20px 96px; }
+.zone { position: relative; }
+.zone-art { position: absolute; top: 0; bottom: 0; left: 50%; width: 100vw;
+  transform: translateX(-50%); z-index: -1; overflow: hidden; pointer-events: none; }
 header.site-header { margin: 18px 0 26px; }
 h1.site-title { margin: 0; }
 .readouts { display: flex; flex-wrap: wrap; gap: 18px; margin-bottom: 22px; }
@@ -73,27 +81,42 @@ footer.site-footer p { margin: 4px 0; }
 <body class="%%THEME_CLASS%%">
 %%BODY_ART%%
 <div class="page">
-  <header class="site-header"><h1 class="site-title">%%TITLE_MARKUP%%</h1></header>
+  <div class="zone zone-sky">
+    %%SKY_ART%%
+    <header class="site-header"><h1 class="site-title">%%TITLE_MARKUP%%</h1></header>
 
-  <section class="readouts" aria-label="Current basement conditions">
-    <div class="readout">
-      <div class="readout-value">%%READOUT_RH%%<span class="readout-unit">%</span></div>
-      <div class="readout-label">Basement relative humidity</div>
-    </div>
-    <div class="readout">
-      <div class="readout-value">%%READOUT_TEMP%%<span class="readout-unit">°C</span></div>
-      <div class="readout-label">Basement temperature</div>
-    </div>
-  </section>
+    <section class="readouts" aria-label="Current basement conditions">
+      <div class="readout readout-humidity" style="--fill: %%READOUT_RH%%%">
+        <div class="readout-value">%%READOUT_RH%%<span class="readout-unit">%</span></div>
+        <div class="readout-label">Basement relative humidity</div>
+      </div>
+      <div class="readout readout-temperature">
+        <div class="readout-value">%%READOUT_TEMP%%<span class="readout-unit">°C</span></div>
+        <div class="readout-label">Basement temperature</div>
+      </div>
+    </section>
+%%SCROLL_HINT%%
+    <div class="chart-slot" data-slot="sky"></div>
+  </div>
 
-  <div id="chart-sections"></div>
+  <div class="zone zone-ground">
+    %%GROUND_ART%%
+    <div class="chart-slot" data-slot="ground"></div>
+  </div>
 
-  <footer class="site-footer">
-    <p class="freshness">Data to %%LATEST_TIME%%</p>
-    <p class="sources">Indoor readings come from thermometer–hygrometer sensors in the basement,
-    bedroom, and living room. Outdoor humidity comes from the Open-Meteo weather archive.
-    Rainfall comes from a nearby Environment Agency rain gauge.</p>
-  </footer>
+  %%WATERLINE_ART%%
+
+  <div class="zone zone-under">
+    %%UNDER_ART%%
+    <div class="chart-slot" data-slot="under"></div>
+
+    <footer class="site-footer">
+      <p class="freshness">Data to %%LATEST_TIME%%</p>
+      <p class="sources">Indoor readings come from thermometer–hygrometer sensors in the basement,
+      bedroom, and living room. Outdoor humidity comes from the Open-Meteo weather archive.
+      Rainfall comes from a nearby Environment Agency rain gauge.</p>
+    </footer>
+  </div>
 </div>
 
 <nav class="proto-switcher" aria-label="Mockup switcher">
@@ -130,6 +153,7 @@ RUNTIME_JS = r"""
 
   var THEME = window.MOCKUP_THEME;
   var BUNDLE = JSON.parse(document.getElementById("chart-payloads").textContent);
+  var CHART_SLOTS = THEME.chartSlots || ["sky", "ground"];
 
   function formatTimestamp(epochSeconds) {
     if (epochSeconds == null) { return ""; }
@@ -165,22 +189,44 @@ RUNTIME_JS = r"""
     });
   }
 
+  function drawEventBubbles(plot, x) {
+    var ctx = plot.ctx;
+    var bottom = plot.bbox.top + plot.bbox.height;
+    var step = 26;
+    var count = 0;
+    for (var y = bottom - 9; y > plot.bbox.top + 8; y -= step) {
+      var radius = count % 2 === 0 ? 2.4 : 3.4;
+      var offset = count % 2 === 0 ? -2.5 : 2.5;
+      ctx.beginPath();
+      ctx.arc(x + offset, y, radius, 0, Math.PI * 2);
+      ctx.globalAlpha = 0.3;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.stroke();
+      count += 1;
+    }
+  }
+
   function eventMarkerPlugin(events) {
     return { hooks: { draw: [function (plot) {
       if (!events.length) { return; }
       var ctx = plot.ctx;
       ctx.save();
+      ctx.beginPath();
+      ctx.rect(plot.bbox.left, plot.bbox.top, plot.bbox.width, plot.bbox.height);
+      ctx.clip();
       ctx.strokeStyle = THEME.event;
+      ctx.fillStyle = THEME.event;
       ctx.lineWidth = 1;
-      ctx.setLineDash([4, 4]);
+      if (!THEME.eventBubbles) { ctx.setLineDash([4, 4]); }
       events.forEach(function (event) {
         var x = plot.valToPos(event.timestamp, "x", true);
-        if (x >= plot.bbox.left && x <= plot.bbox.left + plot.bbox.width) {
-          ctx.beginPath();
-          ctx.moveTo(Math.round(x) + 0.5, plot.bbox.top);
-          ctx.lineTo(Math.round(x) + 0.5, plot.bbox.top + plot.bbox.height);
-          ctx.stroke();
-        }
+        if (x < plot.bbox.left || x > plot.bbox.left + plot.bbox.width) { return; }
+        if (THEME.eventBubbles) { drawEventBubbles(plot, Math.round(x) + 0.5); return; }
+        ctx.beginPath();
+        ctx.moveTo(Math.round(x) + 0.5, plot.bbox.top);
+        ctx.lineTo(Math.round(x) + 0.5, plot.bbox.top + plot.bbox.height);
+        ctx.stroke();
       });
       ctx.restore();
     }] } };
@@ -253,6 +299,7 @@ RUNTIME_JS = r"""
       ctx.fillStyle = hexToRgba(color, 0.9);
       var minX = plot.bbox.left - 40;
       var maxX = plot.bbox.left + plot.bbox.width + 40;
+      var droplets = THEME.rainDroplets && typeof ctx.roundRect === "function";
       timestamps.forEach(function (ts, index) {
         var value = values[index];
         if (value == null || !Number.isFinite(value) || value <= 0) { return; }
@@ -261,7 +308,15 @@ RUNTIME_JS = r"""
         if (xRight < minX || xLeft > maxX) { return; }
         var y = plot.valToPos(value, series.scale, true);
         var width = Math.max(1, xRight - xLeft - 1);
-        ctx.fillRect(xLeft, y, width, Math.max(1, zeroY - y));
+        var height = Math.max(1, zeroY - y);
+        if (droplets && width >= 2 && height >= 2) {
+          var radius = Math.min(width / 2, 3.5, height);
+          ctx.beginPath();
+          ctx.roundRect(xLeft, y, width, height, [radius, radius, 0, 0]);
+          ctx.fill();
+          return;
+        }
+        ctx.fillRect(xLeft, y, width, height);
       });
       ctx.restore();
     }] } };
@@ -360,7 +415,23 @@ RUNTIME_JS = r"""
     }, { passive: false });
   }
 
-  function renderChart(payload) {
+  function waterFill(color) {
+    return function (plot) {
+      var top = plot.bbox.top;
+      var height = plot.bbox.height;
+      if (!Number.isFinite(top) || !Number.isFinite(height) || height <= 0) {
+        return hexToRgba(color, 0.18);
+      }
+      var gradient = plot.ctx.createLinearGradient(0, top, 0, top + height);
+      gradient.addColorStop(0, hexToRgba(color, 0.4));
+      gradient.addColorStop(1, hexToRgba(color, 0.03));
+      return gradient;
+    };
+  }
+
+  function renderChart(payload, chartIndex) {
+    var slotName = CHART_SLOTS[chartIndex] || "under";
+    var slot = document.querySelector('.chart-slot[data-slot="' + slotName + '"]');
     var card = document.createElement("section");
     card.className = "chart-card";
     var head = document.createElement("div");
@@ -373,7 +444,7 @@ RUNTIME_JS = r"""
     var host = document.createElement("div");
     host.className = "chart-host";
     card.append(head, host);
-    document.getElementById("chart-sections").append(card);
+    slot.append(card);
     normalizeGaps(payload);
     var bounds = dataBounds(payload);
     var perScale = scaleBounds(payload);
@@ -420,6 +491,10 @@ RUNTIME_JS = r"""
       };
       if (series.kind === "bar") {
         options.paths = function () { return null; };
+      }
+      if (THEME.heroWater && chartIndex === 0 && series.role === "basementRh") {
+        options.fill = waterFill(THEME.roles[series.role]);
+        options.width = 2.5;
       }
       return options;
     }));
@@ -539,110 +614,388 @@ body.theme-instrument {
 }
 """
 
+# The extreme aero skin, round 3 (ticket 16). One tall scene image (sky -> hills ->
+# waterline -> underwater) is pinned so the waterline peeks just above the fold; the
+# fold screen holds only the title, the orbs, and a scroll hint; all charts live
+# underwater; a concrete floor band with a dehumidifier closes the page. Asset data
+# URIs are injected as CSS custom properties by the build (see aero_asset_css).
+#
+# Scene geometry: the image is 1024x1536 displayed at 100vw, so its height is 150vw;
+# the meniscus sits at ~63% of the image, i.e. 94.5vw from its top. Pinning the
+# meniscus at --waterline-y gives --scene-top (negative on landscape screens: the
+# image top crops off above the viewport, which also crops the sun; on portrait
+# screens it is positive and .aero-sky-extend fills the gap with a matched gradient
+# and a radial continuation of the sun glow).
 AERO_CSS = """
 body.theme-aero {
-  --bg: linear-gradient(180deg, #8fd0f4 0%, #c9ecfb 38%, #eaf9ff 70%, #d8f2e2 100%);
+  --bg: #073a58;
   --ink: #123a55;
   --ink-muted: #4a7391;
   --body-font: "Segoe UI", "Helvetica Neue", -apple-system, "Frutiger", sans-serif;
+  --waterline-y: 92vh;
+  --scene-h: 150vw;
+  --scene-waterline: 94.5vw;
+  --scene-top: calc(var(--waterline-y) - var(--scene-waterline));
+  --scene-bottom: calc(var(--waterline-y) + var(--scene-h) - var(--scene-waterline));
   background: var(--bg);
-  background-attachment: fixed;
+  overflow-x: hidden;
+  position: relative;
 }
-.theme-aero .page { z-index: 2; }
+
+/* ----- the descent backdrop (body-level, scrolls with the page) ----- */
+.aero-scene-wrap {
+  position: absolute; top: 0; left: 0; width: 100%; height: var(--scene-bottom);
+  overflow: hidden; pointer-events: none;
+}
+.aero-sky-extend {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(56vw 56vw at 15vw calc(var(--scene-top) + 21vw),
+      rgba(190, 235, 255, 0.6), rgba(190, 235, 255, 0) 70%),
+    linear-gradient(90deg, rgba(150, 215, 255, 0.35) 0%, rgba(150, 215, 255, 0) 40%,
+      rgba(2, 45, 140, 0.25) 100%),
+    linear-gradient(180deg, #0143a0 0%, #0062d7 var(--scene-top), #0062d7 100%);
+}
+.aero-scene {
+  position: absolute; top: var(--scene-top); left: 0; width: 100%; height: var(--scene-h);
+  background: var(--tall-scene-img) center / 100% 100% no-repeat;
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 56px);
+  mask-image: linear-gradient(180deg, transparent 0, #000 56px);
+}
+.aero-scene-fade {
+  position: absolute; left: 0; width: 100%; height: 22vw;
+  top: calc(var(--scene-bottom) - 22vw);
+  background: linear-gradient(180deg, rgba(6, 65, 110, 0) 0%, #06416e 96%);
+}
+.aero-deep {
+  position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(180deg,
+    rgba(6, 65, 110, 0) 0, rgba(6, 65, 110, 0) var(--scene-bottom),
+    #06416e var(--scene-bottom), #052c46 72%, #04202f 100%);
+}
+
+/* ----- title, gone to eleven ----- */
 .theme-aero h1.site-title {
-  font-size: 40px;
-  font-weight: 400;
-  letter-spacing: 0.01em;
-  background: linear-gradient(180deg, #063d6b 15%, #0b6bb0 60%, #2596d2 100%);
+  font-size: clamp(38px, 5.4vw, 58px);
+  font-weight: 650;
+  letter-spacing: 0.005em;
+  background: linear-gradient(180deg, #04365f 0%, #0a63a8 42%, #2ea3dc 72%, #8fdcf8 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.85)) drop-shadow(0 2px 10px rgba(255, 255, 255, 0.6));
+  filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.95))
+          drop-shadow(0 2px 2px rgba(255, 255, 255, 0.55))
+          drop-shadow(0 8px 22px rgba(8, 70, 125, 0.4));
 }
-.theme-aero .readout, .theme-aero .chart-card {
+
+/* ----- zone A: the fold screen (title + orbs + scroll hint only) ----- */
+.theme-aero .zone-sky { margin-top: -28px; padding-top: 0; min-height: 100vh; }
+.theme-aero header.site-header { margin: 9vh 0 0; text-align: center; }
+.theme-aero .readouts { margin-top: 7vh; }
+.aero-scroll-hint {
+  position: absolute; left: 50%; top: 74vh; transform: translateX(-50%); z-index: 1;
+}
+.aero-scroll-hint span {
+  display: block; width: 26px; height: 26px;
+  border-right: 6px solid rgba(255, 255, 255, 0.95);
+  border-bottom: 6px solid rgba(255, 255, 255, 0.95);
+  border-radius: 3px;
+  filter: drop-shadow(0 3px 10px rgba(8, 70, 125, 0.6));
+  animation: hint-bob 1.8s ease-in-out infinite;
+}
+@keyframes hint-bob {
+  0%, 100% { transform: rotate(45deg) translate(0, 0); opacity: 0.8; }
+  50% { transform: rotate(45deg) translate(7px, 7px); opacity: 1; }
+}
+.aero-aurora {
+  position: absolute; height: 240px; width: 150%; left: -25%;
+  background: linear-gradient(100deg, transparent 8%, rgba(130, 255, 225, 0.28) 30%,
+    rgba(150, 195, 255, 0.32) 52%, rgba(255, 190, 245, 0.24) 72%, transparent 92%);
+  filter: blur(28px);
+  mix-blend-mode: screen;
+  animation: aurora-drift 16s ease-in-out infinite alternate;
+}
+.aero-aurora.aurora-2 { animation-duration: 23s; animation-delay: -8s; opacity: 0.7; }
+@keyframes aurora-drift {
+  from { transform: rotate(-7deg) translateX(-50px); }
+  to { transform: rotate(-4deg) translateX(50px); }
+}
+.aero-bokeh {
+  position: absolute; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, rgba(255,255,255,0.95) 0%,
+    rgba(255,255,255,0.25) 55%, transparent 72%);
+  filter: blur(1.5px); opacity: 0.55;
+  animation: bokeh-drift ease-in-out infinite alternate;
+}
+@keyframes bokeh-drift {
+  from { transform: translate(0, 0); }
+  to { transform: translate(26px, -34px); }
+}
+.aero-fish-sky {
+  position: absolute; width: clamp(110px, 14vw, 185px); aspect-ratio: 640 / 480;
+  background: var(--goldfish-img) center / contain no-repeat;
+  filter: drop-shadow(0 10px 16px rgba(10, 70, 120, 0.35));
+  animation: fish-swim 11s ease-in-out infinite alternate;
+}
+@keyframes fish-swim {
+  from { transform: translate(0, 0) rotate(-5deg); }
+  to { transform: translate(-70px, 26px) rotate(3deg); }
+}
+
+/* ----- readout orbs ----- */
+.theme-aero .readouts { gap: 36px; justify-content: center; margin-bottom: 30px; }
+.theme-aero .readout {
+  flex: 0 0 236px; width: 236px; height: 236px; border-radius: 50%;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; position: relative; overflow: hidden; padding: 0 26px;
+  border: 1px solid rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 14px 34px rgba(12, 80, 130, 0.35), 0 0 26px rgba(140, 220, 255, 0.4),
+    inset 0 2px 2px rgba(255, 255, 255, 0.95), inset 0 -14px 26px rgba(90, 180, 230, 0.35),
+    0 40px 30px -22px rgba(25, 140, 205, 0.45);
+}
+.theme-aero .readout-humidity {
+  background: radial-gradient(circle at 32% 26%, rgba(255,255,255,0.9) 0%,
+    rgba(225,246,255,0.55) 32%, rgba(170,220,248,0.4) 62%, rgba(125,195,238,0.55) 100%);
+}
+.theme-aero .readout-humidity::before {
+  content: "";
+  position: absolute; left: 0; right: 0; bottom: 0; height: var(--fill, 50%);
+  background: linear-gradient(180deg, rgba(110, 210, 252, 0.6) 0%, rgba(25, 132, 202, 0.72) 100%);
+  border-radius: 46% 54% 0 0 / 16px 20px 0 0;
+  box-shadow: inset 0 3px 3px -1px rgba(255, 255, 255, 0.95);
+  animation: water-slosh 7s ease-in-out infinite alternate;
+}
+@keyframes water-slosh {
+  from { border-radius: 46% 54% 0 0 / 18px 12px 0 0; }
+  to { border-radius: 54% 46% 0 0 / 12px 18px 0 0; }
+}
+.theme-aero .readout-temperature {
+  background: radial-gradient(circle at 32% 26%, rgba(255,255,255,0.92) 0%,
+    rgba(255,238,205,0.6) 34%, rgba(252,195,115,0.5) 66%, rgba(240,150,55,0.6) 100%);
+  box-shadow: 0 14px 34px rgba(140, 85, 15, 0.3), 0 0 26px rgba(255, 205, 130, 0.45),
+    inset 0 2px 2px rgba(255, 255, 255, 0.95), inset 0 -14px 26px rgba(235, 155, 60, 0.4),
+    0 40px 30px -22px rgba(220, 140, 45, 0.4);
+}
+.theme-aero .readout::after {
+  content: "";
+  position: absolute; left: 19%; right: 19%; top: 7%; height: 30%;
+  border-radius: 50%;
+  background: linear-gradient(180deg, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.05) 100%);
+  pointer-events: none;
+}
+.theme-aero .readout-value {
+  position: relative; z-index: 1;
+  font-size: 54px; font-weight: 300; color: #084a80;
+  text-shadow: 0 1px 0 rgba(255,255,255,0.85); font-variant-numeric: tabular-nums;
+}
+.theme-aero .readout-temperature .readout-value { color: #a34a02; }
+.theme-aero .readout-unit { font-size: 24px; margin-left: 4px; color: inherit; opacity: 0.75; }
+.theme-aero .readout-label {
+  position: relative; z-index: 1; margin-top: 8px; font-size: 13px; color: #275b7e;
+}
+.theme-aero .readout-temperature .readout-label { color: #7c4a14; }
+
+/* ----- Vista-grade glass panels ----- */
+.theme-aero .chart-card {
   position: relative;
-  background: linear-gradient(180deg, rgba(255,255,255,0.72) 0%, rgba(255,255,255,0.5) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.85);
-  border-radius: 20px;
-  box-shadow: 0 8px 28px rgba(23, 94, 140, 0.18), inset 0 1px 0 rgba(255,255,255,0.9);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: linear-gradient(180deg, rgba(255,255,255,0.8) 0%, rgba(255,255,255,0.56) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.95);
+  border-radius: 22px;
+  padding: 16px 18px 10px;
+  box-shadow: 0 12px 36px rgba(10, 70, 120, 0.28), 0 0 0 1px rgba(150, 225, 255, 0.35),
+    0 0 30px rgba(120, 210, 255, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    inset 0 -12px 20px rgba(150, 215, 245, 0.3);
+  backdrop-filter: blur(16px) saturate(1.25);
+  -webkit-backdrop-filter: blur(16px) saturate(1.25);
   overflow: hidden;
 }
-.theme-aero .readout::before, .theme-aero .chart-card::before {
+.theme-aero .chart-card::before {
   content: "";
   position: absolute; left: 14px; right: 14px; top: 0; height: 54px;
   background: linear-gradient(180deg, rgba(255,255,255,0.65), rgba(255,255,255,0.06));
   border-radius: 16px 16px 28px 28px;
   pointer-events: none;
 }
-.theme-aero .readout { padding: 18px 22px; }
-.theme-aero .readout-value {
-  font-size: 58px; font-weight: 250; color: #0b5f9e;
-  text-shadow: 0 1px 0 rgba(255,255,255,0.8); font-variant-numeric: tabular-nums;
+.theme-aero .chart-card::after {
+  content: "";
+  position: absolute; top: -20px; bottom: -20px; left: 0; width: 46%;
+  background: linear-gradient(105deg, transparent 20%, rgba(255,255,255,0.5) 50%, transparent 80%);
+  transform: translateX(-130%) skewX(-18deg);
+  pointer-events: none;
+  animation: sheen-sweep 1.7s ease-out 0.5s 1 both;
 }
-.theme-aero .readout:nth-child(2) .readout-value { color: #c25a08; }
-.theme-aero .readout-unit { font-size: 26px; margin-left: 5px; color: var(--ink-muted); }
-.theme-aero .readout-label { margin-top: 6px; font-size: 14px; color: var(--ink-muted); }
-.theme-aero .chart-card { padding: 16px 18px 10px; }
-.theme-aero .chart-head h2 { font-size: 17px; font-weight: 500; color: #0b5f9e; }
+.theme-aero .chart-card:hover::after { animation: sheen-sweep-again 1.1s ease-out 1 both; }
+@keyframes sheen-sweep { to { transform: translateX(320%) skewX(-18deg); } }
+@keyframes sheen-sweep-again {
+  from { transform: translateX(-130%) skewX(-18deg); }
+  to { transform: translateX(320%) skewX(-18deg); }
+}
+.theme-aero .chart-head h2 { font-size: 17px; font-weight: 600; color: #0b5f9e; }
 .theme-aero .chart-head, .theme-aero .chart-host, .theme-aero .u-legend { position: relative; z-index: 1; }
+
+/* ----- candy gel buttons ----- */
 .theme-aero .chart-actions button {
-  background: linear-gradient(180deg, #eafaff 0%, #bfe9fb 45%, #9adcf7 55%, #d6f4ff 100%);
-  color: #0b5f9e; border: 1px solid rgba(122, 190, 222, 0.9);
-  font: 13px/1.5 var(--body-font); padding: 4px 16px; border-radius: 999px;
-  box-shadow: 0 2px 6px rgba(23, 94, 140, 0.25), inset 0 1px 0 rgba(255,255,255,0.9);
+  background: linear-gradient(180deg, #f4fdff 0%, #c9effd 42%, #8edcf8 58%, #cdf3ff 100%);
+  color: #0b5f9e; border: 1px solid #79c3e3; font: 600 13px/1.5 var(--body-font);
+  padding: 5px 18px; border-radius: 999px;
+  box-shadow: 0 3px 8px rgba(20, 90, 140, 0.3), inset 0 1px 0 rgba(255,255,255,0.95),
+    inset 0 -5px 8px rgba(70, 170, 220, 0.35), 0 10px 10px -6px rgba(120, 210, 255, 0.5);
 }
 .theme-aero .chart-actions button[aria-pressed="true"] {
-  background: linear-gradient(180deg, #35b7e8 0%, #0f7fce 55%, #35b7e8 100%);
-  color: #ffffff; border-color: #0f7fce;
+  background: linear-gradient(180deg, #6fd0f2 0%, #0f7fce 52%, #0a6cb4 60%, #4db6e6 100%);
+  color: #ffffff; border-color: #0a6cb4;
+  box-shadow: 0 3px 10px rgba(10, 90, 150, 0.45), inset 0 1px 0 rgba(255,255,255,0.6),
+    inset 0 -5px 10px rgba(6, 60, 105, 0.4), 0 10px 10px -6px rgba(60, 180, 240, 0.55);
 }
 .theme-aero .u-legend { font: 12px var(--body-font); color: var(--ink); }
+
+/* ----- ground zone collapses: the scene image carries the hills ----- */
+.theme-aero .zone-ground { padding: 0; }
+.aero-dragonfly {
+  position: absolute; top: 56vh; right: 6%; width: 148px; aspect-ratio: 512 / 342;
+  background: var(--dragonfly-img) center / contain no-repeat;
+  transform: rotate(-8deg); z-index: 2; pointer-events: none;
+  filter: drop-shadow(0 8px 12px rgba(20, 70, 110, 0.35));
+  animation: dragonfly-hover 3.2s ease-in-out infinite alternate;
+}
+@keyframes dragonfly-hover {
+  from { transform: rotate(-8deg) translateY(0); }
+  to { transform: rotate(-6deg) translateY(6px); }
+}
+@media (max-width: 760px) {
+  .aero-dragonfly { display: none; }
+  .theme-aero .readout { flex: 0 0 196px; width: 196px; height: 196px; }
+  .theme-aero .readout-value { font-size: 44px; }
+}
+
+/* ----- zone C: underwater (all charts + footer) -----
+   Charts start just below the fold (User, round-3 reactions), floating over the
+   scene's own underwater sunbeams; the frost carries legibility. */
+.theme-aero .zone-under {
+  padding-top: 4vh;
+  color: #e9f7ff;
+}
+.aero-underbubble {
+  position: absolute; bottom: -70px; border-radius: 50%;
+  background: radial-gradient(circle at 32% 28%, rgba(255,255,255,0.9) 0%,
+    rgba(255,255,255,0.28) 24%, rgba(190,235,255,0.12) 60%, rgba(160,220,250,0.3) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  box-shadow: inset -5px -7px 14px rgba(120, 200, 240, 0.3);
+  animation: bubble-rise linear infinite;
+}
+@keyframes bubble-rise {
+  0% { transform: translate(0, 0); opacity: 0; }
+  8% { opacity: 0.9; }
+  100% { transform: translate(26px, -1600px); opacity: 0; }
+}
+.aero-fish-deep {
+  position: absolute; top: calc(100vh + 34vw); left: 8%; width: 110px; aspect-ratio: 640 / 480;
+  background: var(--goldfish-img) center / contain no-repeat;
+  transform: scaleX(-1);
+  filter: brightness(0.35) saturate(0.4) blur(1.5px); opacity: 0.5;
+  animation: fish-deep-drift 70s ease-in-out infinite alternate;
+}
+@keyframes fish-deep-drift {
+  from { transform: scaleX(-1) translate(0, 0); }
+  to { transform: scaleX(-1) translate(-58vw, 40px); }
+}
+
+/* ----- the basement floor: concrete band + dehumidifier, emerging from the murk ----- */
+.aero-deep-floor {
+  position: absolute; left: 0; right: 0; bottom: 0; height: min(240px, 30vw);
+  background: var(--floor-strip-img) bottom center / auto 100% repeat-x;
+  -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 60%);
+  mask-image: linear-gradient(180deg, transparent 0%, #000 60%);
+}
+.aero-deep-floor::after {
+  content: "";
+  position: absolute; inset: 0;
+  background: linear-gradient(180deg, rgba(4, 30, 48, 0.72) 0%,
+    rgba(6, 45, 70, 0.5) 45%, rgba(8, 55, 84, 0.4) 100%);
+}
+.aero-dehumidifier {
+  position: absolute; right: 6%; bottom: min(88px, 11vw);
+  width: clamp(130px, 15vw, 200px); aspect-ratio: 640 / 427;
+  background: var(--dehumidifier-img) bottom / contain no-repeat;
+  filter: brightness(0.88) saturate(0.92) drop-shadow(0 12px 16px rgba(2, 18, 30, 0.6));
+}
+.theme-aero .page { padding-bottom: 300px; }
+
+/* underwater panels: stronger frost over the loudest background */
+.theme-aero .zone-under .chart-card {
+  background: linear-gradient(180deg, rgba(255,255,255,0.88) 0%, rgba(255,255,255,0.7) 100%);
+  backdrop-filter: blur(20px) saturate(1.2);
+  -webkit-backdrop-filter: blur(20px) saturate(1.2);
+}
 .theme-aero footer.site-footer {
-  font-size: 13.5px; color: #29597a;
-  background: linear-gradient(180deg, rgba(255,255,255,0.5), rgba(255,255,255,0.3));
-  border: 1px solid rgba(255,255,255,0.8); border-radius: 16px; padding: 12px 18px;
-  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  position: relative; z-index: 1;
+  font-size: 13.5px; color: #e9f7ff;
+  background: linear-gradient(180deg, rgba(10, 55, 84, 0.55), rgba(7, 40, 62, 0.75));
+  border: 1px solid rgba(170, 230, 255, 0.4); border-radius: 16px; padding: 12px 18px;
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 10px 28px rgba(3, 25, 40, 0.5), inset 0 1px 0 rgba(200, 240, 255, 0.35);
 }
-.aero-sun {
-  position: fixed; top: -140px; left: -120px; width: 460px; height: 460px; z-index: 1;
-  background: radial-gradient(circle, rgba(255,255,240,0.9) 0%, rgba(255,255,240,0.35) 38%, transparent 70%);
-  pointer-events: none;
-}
-.aero-bubble {
-  position: fixed; border-radius: 50%; z-index: 1; pointer-events: none;
-  background: radial-gradient(circle at 32% 28%, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0.28) 22%, rgba(190,235,255,0.14) 60%, rgba(160,220,250,0.28) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.55);
-  box-shadow: inset -6px -8px 18px rgba(120, 200, 240, 0.28);
-}
-.aero-hill {
-  position: fixed; left: 0; right: 0; bottom: 0; height: 150px; width: 100%;
-  z-index: 1; pointer-events: none;
+.theme-aero footer.site-footer .sources { color: #b9dcef; }
+
+@media (prefers-reduced-motion: reduce) {
+  .theme-aero *, .theme-aero *::before, .theme-aero *::after { animation: none !important; }
 }
 """
 
-AERO_ART = """
-<div class="aero-sun" aria-hidden="true"></div>
-<div class="aero-bubble" style="width:130px;height:130px;right:6%;top:12%" aria-hidden="true"></div>
-<div class="aero-bubble" style="width:70px;height:70px;right:14%;top:30%" aria-hidden="true"></div>
-<div class="aero-bubble" style="width:44px;height:44px;right:4%;top:42%" aria-hidden="true"></div>
-<div class="aero-bubble" style="width:90px;height:90px;left:3%;top:58%" aria-hidden="true"></div>
-<div class="aero-bubble" style="width:52px;height:52px;left:10%;top:76%" aria-hidden="true"></div>
-<svg class="aero-hill" aria-hidden="true" viewBox="0 0 1200 150" preserveAspectRatio="none">
-  <path d="M0,110 C240,30 480,140 720,84 C900,44 1060,120 1200,74 L1200,150 L0,150 Z" fill="#8fce7e" opacity="0.5"/>
-  <path d="M0,128 C300,74 560,148 840,106 C1020,80 1120,128 1200,108 L1200,150 L0,150 Z" fill="#5fb457" opacity="0.55"/>
-</svg>
+AERO_BODY_ART = """
+<div class="aero-scene-wrap" aria-hidden="true">
+  <div class="aero-sky-extend"></div>
+  <div class="aero-scene"></div>
+  <div class="aero-scene-fade"></div>
+</div>
+<div class="aero-deep" aria-hidden="true">
+  <div class="aero-underbubble" style="width:18px;height:18px;left:8%;animation-duration:13s;animation-delay:-3s"></div>
+  <div class="aero-underbubble" style="width:34px;height:34px;left:23%;animation-duration:17s;animation-delay:-9s"></div>
+  <div class="aero-underbubble" style="width:12px;height:12px;left:44%;animation-duration:11s;animation-delay:-6s"></div>
+  <div class="aero-underbubble" style="width:26px;height:26px;left:62%;animation-duration:15s;animation-delay:-1s"></div>
+  <div class="aero-underbubble" style="width:42px;height:42px;left:78%;animation-duration:19s;animation-delay:-12s"></div>
+  <div class="aero-underbubble" style="width:16px;height:16px;left:91%;animation-duration:12s;animation-delay:-8s"></div>
+  <div class="aero-fish-deep"></div>
+  <div class="aero-deep-floor"></div>
+  <div class="aero-dehumidifier"></div>
+</div>
 """
 
+AERO_SKY_ART = """
+<div class="zone-art" aria-hidden="true">
+  <div class="aero-aurora" style="top: 130px"></div>
+  <div class="aero-aurora aurora-2" style="top: 420px"></div>
+  <div class="aero-bokeh" style="width:84px;height:84px;left:6%;top:16%;animation-duration:9s"></div>
+  <div class="aero-bokeh" style="width:38px;height:38px;left:16%;top:38%;animation-duration:13s"></div>
+  <div class="aero-bokeh" style="width:56px;height:56px;right:9%;top:24%;animation-duration:11s"></div>
+  <div class="aero-bokeh" style="width:26px;height:26px;right:20%;top:52%;animation-duration:8s"></div>
+  <div class="aero-fish-sky" style="right:5%;top:330px"></div>
+</div>
+<div class="aero-dragonfly" aria-hidden="true"></div>
+"""
+
+AERO_SCROLL_HINT = """
+    <div class="aero-scroll-hint" aria-hidden="true"><span></span></div>
+"""
+
+# Chart palettes are the validated ticket-11 round-1 palettes — do not change them
+# (EXTREME-AERO-PLAN.md guardrail); only panel surfaces changed and were re-validated.
 THEMES = [
     {
         "file": "instrument-panel.html",
         "name": "Instrument panel",
         "css_class": "theme-instrument",
         "css": INSTRUMENT_CSS,
-        "art": "",
+        "body_art": "",
+        "sky_art": "",
+        "ground_art": "",
+        "waterline_art": "",
+        "under_art": "",
+        "scroll_hint": "",
         "title_markup": "Watch a basement dry",
         "config": {
+            "chartSlots": ["sky", "ground"],
             "roles": {
                 "basementRh": "#1fa34c",
                 "basementTemp": "#b8830a",
@@ -663,12 +1016,18 @@ THEMES = [
     },
     {
         "file": "frutiger-aero.html",
-        "name": "Frutiger Aero",
+        "name": "Frutiger Aero (extreme)",
         "css_class": "theme-aero",
         "css": AERO_CSS,
-        "art": AERO_ART,
+        "body_art": AERO_BODY_ART,
+        "sky_art": AERO_SKY_ART,
+        "ground_art": "",
+        "waterline_art": "",
+        "under_art": "",
+        "scroll_hint": AERO_SCROLL_HINT,
         "title_markup": "Watch a basement dry",
         "config": {
+            "chartSlots": [],
             "roles": {
                 "basementRh": "#0b76c2",
                 "basementTemp": "#d96608",
@@ -681,13 +1040,27 @@ THEMES = [
             "ink": "#123a55",
             "inkMuted": "#4a7391",
             "grid": "rgba(15, 127, 206, 0.14)",
-            "event": "rgba(194, 90, 8, 0.5)",
+            "event": "rgba(15, 110, 175, 0.55)",
             "bandAlpha": 0.14,
             "axisFont": "12px 'Segoe UI', 'Helvetica Neue', sans-serif",
             "axisLabelFont": "12px 'Segoe UI', 'Helvetica Neue', sans-serif",
+            "heroWater": True,
+            "rainDroplets": True,
+            "eventBubbles": True,
         },
     },
 ]
+
+AERO_ASSETS = ["tall-scene", "floor-strip", "dehumidifier", "goldfish", "dragonfly"]
+
+
+def aero_asset_css() -> str:
+    lines = [".theme-aero {"]
+    for stem in AERO_ASSETS:
+        encoded = base64.b64encode((DERIVED / f"{stem}.webp").read_bytes()).decode("ascii")
+        lines.append(f'  --{stem}-img: url("data:image/webp;base64,{encoded}");')
+    lines.append("}")
+    return "\n".join(lines)
 
 
 def main() -> None:
@@ -696,17 +1069,26 @@ def main() -> None:
     latest = payloads["latest"]
     uplot_css = (VENDOR / "uPlot.min.css").read_text(encoding="utf-8")
     uplot_js = (VENDOR / "uPlot.iife.min.js").read_text(encoding="utf-8")
+    asset_css = aero_asset_css()
 
     for index, theme in enumerate(THEMES):
         previous = THEMES[(index - 1) % len(THEMES)]["file"]
         following = THEMES[(index + 1) % len(THEMES)]["file"]
+        theme_css = theme["css"]
+        if theme["css_class"] == "theme-aero":
+            theme_css = asset_css + "\n" + theme_css
         page = (
             PAGE_TEMPLATE
             .replace("%%TITLE%%", f"Watch a basement dry — mockup {index + 1}: {theme['name']}")
             .replace("%%TITLE_MARKUP%%", theme["title_markup"])
             .replace("%%THEME_CLASS%%", theme["css_class"])
-            .replace("%%THEME_CSS%%", theme["css"])
-            .replace("%%BODY_ART%%", theme["art"])
+            .replace("%%THEME_CSS%%", theme_css)
+            .replace("%%BODY_ART%%", theme["body_art"])
+            .replace("%%SKY_ART%%", theme["sky_art"])
+            .replace("%%GROUND_ART%%", theme["ground_art"])
+            .replace("%%WATERLINE_ART%%", theme["waterline_art"])
+            .replace("%%UNDER_ART%%", theme["under_art"])
+            .replace("%%SCROLL_HINT%%", theme["scroll_hint"])
             .replace("%%READOUT_RH%%", f"{latest['relative_humidity_pct']:.1f}")
             .replace("%%READOUT_TEMP%%", f"{latest['temperature_c']:.1f}")
             .replace("%%LATEST_TIME%%", latest["timestamp"])

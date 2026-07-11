@@ -60,7 +60,7 @@ see its [NOTES.md](../../../prototypes/site-redesign-mockups/NOTES.md) for build
 Every per-chart palette triple was validated with the dataviz palette checker against
 each theme's surface.
 
-**Raw reactions (Rob, 2026-07-09):**
+**Raw reactions (User, 2026-07-09):**
 
 - **Instrument panel and Frutiger Aero: "fantastic"** — both survive to the winner
   grill. **Spring / wet moss: dropped** (page deleted, theme removed from the
@@ -80,6 +80,23 @@ each theme's surface.
 The two updated survivors were re-verified in Chrome (week + full-history views, no
 console errors, hover units shown). Picking the winner and slicing implementation is
 [ticket 12](12-grill-mockup-winner-and-implementation.md).
+
+**Round 2 (reopened 2026-07-10, re-resolved 2026-07-11):** the extreme descent skin
+was built into `frutiger-aero.html` per
+[EXTREME-AERO-PLAN.md](../../../prototypes/site-redesign-mockups/EXTREME-AERO-PLAN.md)
+(build detail in the 2026-07-11 comment below). **User's raw reactions: "Cool"
+overall, but the composition needs rework** — image-to-image transitions read as
+seams; the sky image is too short for the page; the SVG-hills + grass layer
+duplicates the scenery already inside the waterline image (suspected fix: one tall
+generated image running sky → hills → waterline); below the water image the CSS
+sun rays/caustics duplicate the image's own rays at lower quality (keep just
+gradient + bubbles + faint goldfish); the waterline should peek just above the
+fold; above the fold only title + orbs + an animated down arrow, all five charts
+moving underwater; plus an open thematic question — should the underwater zone
+read as a *basement* (a room in a house) rather than open water? All captured in
+detail as
+[Refine the extreme aero descent](16-refine-extreme-aero-descent.md), which now
+blocks the winner grill instead of this ticket.
 
 ## Comments
 
@@ -108,3 +125,63 @@ All per-chart palette triples pass the dataviz validator against each theme's su
 (two floor-band CVD warnings are relieved by the always-visible live legend labels).
 Verified in Chrome: week-default and full-history views render with no console errors
 and no gaps across the 10-minute/hourly cadence boundary.
+
+**2026-07-10 (agent)** — Reopened at the user's request for a second prototyping round:
+push the Frutiger Aero skin to the extreme of the style (bolder visuals, possibly
+generated/embedded image assets). Round runs concept ideation → user reaction → prototype
+update. Reopening re-blocks [ticket 12](12-grill-mockup-winner-and-implementation.md)
+(winner grill) until this round resolves.
+
+**2026-07-10 (User, concept reaction)** — "Absolutely fantastic ideas." The **descent
+narrative** (sky → ground → underwater as you scroll) is in. **Data-driven condensation
+is dropped** for now to simplify. Otherwise go **full extreme parody** — everything on;
+tone down from there if needed. Concept plan, asset specs, and image-generation prompts:
+[EXTREME-AERO-PLAN.md](../../../prototypes/site-redesign-mockups/EXTREME-AERO-PLAN.md).
+Next: User generates the raster assets into `prototypes/site-redesign-mockups/assets/`,
+then the agent rebuilds `frutiger-aero.html` around them.
+
+**2026-07-11 (agent)** — All five ChatGPT (GPT Image 2) assets landed in `assets/` and
+reviewed: on-brief keepers, no re-generation needed (detail in the plan file's "Asset
+review round 1"). **Scope note from User: these images are for the final site, not just
+the mockup** — production weight/format/serving decisions go to
+[ticket 12](12-grill-mockup-winner-and-implementation.md). Refined transparent-cutout
+prompts for User's Recraft round added to
+[EXTREME-AERO-PLAN.md](../../../prototypes/site-redesign-mockups/EXTREME-AERO-PLAN.md);
+build starts when User calls the asset set final (or immediately with keyed round-1
+cutouts if Recraft disappoints).
+
+**2026-07-11 (agent) — asset set final, ready for the build session.** The Recraft
+round ran (`*-recraft.png`, true alpha) but User prefers the ChatGPT look and the agent
+review agrees: the Recraft cutouts are darker and more photographic (less period-CGI
+gloss), with ghosting around the goldfish dorsal fins and green haze around the
+dragonfly wings. **Decision: the five ChatGPT images are the final asset set**; the
+build keys the three white-background cutouts into alpha itself and deletes the
+rejected `*-recraft.png` files. Everything the build session needs is in
+[EXTREME-AERO-PLAN.md](../../../prototypes/site-redesign-mockups/EXTREME-AERO-PLAN.md)
+(descent zone map, asset status, CSS/SVG feature list, guardrails, build steps).
+Remaining to resolve this ticket: build the extreme skin into `frutiger-aero.html`
+via `build_mockups.py`, verify in Chrome, update `NOTES.md`, collect User's reactions,
+then record the answer and re-resolve.
+
+**2026-07-11 (agent) — extreme skin built; awaiting User's reactions.**
+[frutiger-aero.html](../../../prototypes/site-redesign-mockups/frutiger-aero.html)
+(2.7 MB self-contained) now carries the full descent: sky zone (title, orb readouts,
+hero chart, aurora ribbons, bokeh, goldfish in open air), shoreline zone (moisture
+chart, hyper-green hills, dewy grass in the viewport corners, dragonfly perched on
+the chart), the half-above/half-below waterline band, and the underwater zone (three
+room charts + footer on the "basement floor", sun rays, animated caustics, rising
+bubbles, distant fish silhouette). The humidity readout is a glass sphere
+water-filled to the reading; temperature is a warm gel orb. Aero-only chart water
+styling: hero relative-humidity area as translucent water, droplet-capped rainfall
+bars, event markers as rising bubble columns. Asset work per plan: the three ChatGPT
+cutouts keyed to true alpha (fins/wings/droplets genuinely translucent), everything
+recompressed to WebP (~550 KB embedded), `*-recraft.png` deleted;
+`process_assets.py` records the derivation. Guardrails held: chart palettes
+untouched and re-validated against the three new frosted zone surfaces (all PASS;
+one WARN — living-room amber 2.63:1 on the underwater panel — relieved by the live
+legend labels, same relief as round 1); underwater panels get the strongest frost;
+[instrument-panel.html](../../../prototypes/site-redesign-mockups/instrument-panel.html)
+visually unchanged. Verified in headless Chrome at 1440px/500px, week + full
+history, zero console errors. Detail in
+[NOTES.md](../../../prototypes/site-redesign-mockups/NOTES.md). Next: User views the
+page and reacts; then the answer is updated and the ticket re-resolves.
