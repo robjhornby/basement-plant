@@ -339,9 +339,7 @@ def build_site_analysis_summary(
             ChartSeries(
                 name="Living room absolute humidity",
                 color="#c2410c",
-                points=tuple(
-                    series_points(chart_sensors, "Living room", "absolute_humidity_g_m3")
-                ),
+                points=tuple(series_points(chart_sensors, "Living room", "absolute_humidity_g_m3")),
                 min_points=tuple(
                     series_points(
                         chart_sensors,

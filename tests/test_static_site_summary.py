@@ -306,7 +306,13 @@ def test_line_chart_runtime_spans_mixed_cadence_alignment_gaps() -> None:
         69.0,
     ).absolute_humidity_g_m3
 
-    assert outdoor_values == [first_weather_value, None, second_weather_value]
+    assert first_weather_value is not None
+    assert second_weather_value is not None
+    assert outdoor_values == [
+        round(first_weather_value, 3),
+        None,
+        round(second_weather_value, 3),
+    ]
     assert "normalizeLineGaps(payload);" in dashboard_html
 
 
@@ -333,12 +339,16 @@ def test_dashboard_and_report_render_from_shared_summary() -> None:
     rendered_html = f"{dashboard_html}\n{report_html}"
 
     assert 'href="physics-report.html"' not in dashboard_html
-    assert "<title>Basement Dampness</title>" in dashboard_html
-    assert "<h1>Basement dampness</h1>" in dashboard_html
-    assert "Latest basement sample" in dashboard_html
-    assert dashboard_html.index("Latest basement sample") < dashboard_html.index(
-        "Hypothesis Evidence"
-    )
+    assert "<title>Watch a basement dry</title>" in dashboard_html
+    assert "<h1>Watch a basement dry</h1>" in dashboard_html
+    assert '<body class="theme-aero">' in dashboard_html
+    assert "position: relative;" in dashboard_html
+    assert ".aero-deep {" in dashboard_html
+    assert "overflow: hidden;" in dashboard_html
+    assert "aero-aurora" in dashboard_html
+    assert "aero-bokeh" in dashboard_html
+    assert "Basement relative humidity" in dashboard_html
+    assert "Basement temperature" in dashboard_html
     for chart_title in (
         "Basement conditions",
         "Absolute humidity",
@@ -352,7 +362,31 @@ def test_dashboard_and_report_render_from_shared_summary() -> None:
         "Raw Sensor Context",
     ):
         assert old_chart_title not in dashboard_html
-    assert "Compatible with active basement drying" in dashboard_html
+    for removed_dashboard_section in (
+        "Latest basement sample",
+        "Hypothesis Evidence",
+        "Event-Bounded Period Metrics",
+        "Compatible with active basement drying",
+    ):
+        assert removed_dashboard_section not in dashboard_html
+    for asset_path in (
+        "assets/frutiger-aero/tall-scene-960.webp",
+        "assets/frutiger-aero/tall-scene-1440.webp",
+        "assets/frutiger-aero/tall-scene-2048.webp",
+        "assets/frutiger-aero/floor-strip.webp",
+        "assets/frutiger-aero/dehumidifier.webp",
+        "assets/frutiger-aero/goldfish.webp",
+        "assets/frutiger-aero/dragonfly.webp",
+    ):
+        assert asset_path in dashboard_html
+    for chart_hook in (
+        "drawEventBubbles(plot",
+        "rainBarPlugin(payload)",
+        "waterFill(themedSeriesColor(series))",
+        'body.classList.contains("theme-aero")',
+    ):
+        assert chart_hook in dashboard_html
+    assert "Data to 2026-07-02 23:00" in dashboard_html
     assert "Prototype scope" not in dashboard_html
     assert 'href="index.html"' in report_html
     assert "Uncertainty Budget" in report_html
@@ -386,6 +420,30 @@ def test_dashboard_renders_self_contained_uplot_charts() -> None:
     assert '"bands":[' in dashboard_html
     assert "<svg" not in dashboard_html
     assert not re.search(r"""<(script|link|img)\b[^>]+(?:src|href)=["']https?://""", dashboard_html)
+
+
+def test_charts_include_touch_interactions_without_trapping_page_scroll() -> None:
+    summary = build_site_analysis_summary(
+        sensor_readings=[
+            sensor_reading("2026-06-28T15:00:00", "Basement", 18.0, 88.0),
+            sensor_reading("2026-07-02T22:00:00", "Basement", 19.0, 72.0),
+        ],
+        events=[Event(datetime.fromisoformat("2026-06-28T16:20:00"), "Bare floor exposed")],
+        weather_hours=[weather_hour("2026-07-02T22:00:00", 17.0, 68.0)],
+        rain_readings=[RainReading(datetime.fromisoformat("2026-07-02T22:10:00"), 0.4)],
+        generated_at=datetime.fromisoformat("2026-07-05T12:00:00"),
+    )
+
+    for rendered_html in (render_index_html(summary), render_physics_report_html(summary)):
+        assert "addTouchNavigation(frame, plot, bounds);" in rendered_html
+        assert 'addEventListener("touchstart"' in rendered_html
+        assert 'addEventListener("touchmove"' in rendered_html
+        assert 'addEventListener("touchend"' in rendered_html
+        assert "touch-action: pan-y;" in rendered_html
+        # One-finger vertical movement stays with the browser so the page can scroll.
+        assert 'gesture = deltaX > deltaY ? "scrub" : "scroll";' in rendered_html
+        assert "addWheelNavigation(frame, plot, bounds);" in rendered_html
+        assert "drag: { x: true, y: false, setScale: true }" in rendered_html
 
 
 def test_render_site_pages_returns_public_relative_path_to_html_mapping() -> None:

@@ -54,6 +54,21 @@ FLOOR_CROP_TOP = 500
 FLOOR_WRAP_OVERLAP = 128
 DEHUMIDIFIER_MAX_WIDTH = 640
 AERO_CUTOUT_MAX_WIDTHS = {"goldfish.png": 640, "dragonfly.png": 512}
+AERO_CHART_SERIES_ROLES = {
+    "Basement relative humidity": "basementRh",
+    "Basement temperature": "basementTemp",
+    "Basement absolute humidity": "basementAh",
+    "Outdoor absolute humidity": "outdoorAh",
+    "Rainfall": "rain",
+    "Bedroom absolute humidity": "bedroom",
+    "Bedroom temperature": "bedroom",
+    "Bedroom relative humidity": "bedroom",
+    "Living room absolute humidity": "livingRoom",
+    "Living room temperature": "livingRoom",
+    "Living room relative humidity": "livingRoom",
+    "Outdoor temperature": "outdoor",
+    "Outdoor relative humidity": "outdoor",
+}
 
 type JsonValue = None | bool | int | float | str | list[JsonValue] | dict[str, JsonValue]
 
@@ -110,6 +125,10 @@ def slugify_identifier(value: str) -> str:
     return slug or "chart"
 
 
+def aero_chart_series_role(series_name: str) -> str:
+    return AERO_CHART_SERIES_ROLES.get(series_name, slugify_identifier(series_name))
+
+
 @lru_cache(maxsize=1)
 def load_uplot_javascript() -> str:
     return (VENDORED_UPLOT_DIR / "uPlot.iife.min.js").read_text(encoding="utf-8")
@@ -132,14 +151,20 @@ def render_json_script(script_id: str, payload: Mapping[str, JsonValue]) -> str:
     )
 
 
-def chart_timestamp_seconds(timestamp: datetime) -> float:
+def chart_timestamp_seconds(timestamp: datetime) -> int:
     local_zone = ZoneInfo(LOCAL_TIMEZONE)
     aware_timestamp = (
         timestamp.replace(tzinfo=local_zone)
         if timestamp.tzinfo is None
         else timestamp.astimezone(local_zone)
     )
-    return aware_timestamp.timestamp()
+    return round(aware_timestamp.timestamp())
+
+
+def chart_value(value: float | None) -> float | None:
+    # Chart tooltips show 2 decimals; 3 keeps a guard digit while avoiding
+    # full float64 repr precision, which dominates inline payload weight.
+    return None if value is None else round(value, 3)
 
 
 def load_sensor_readings(data_dir: Path) -> list[SensorReading]:
@@ -512,10 +537,13 @@ def render_uplot_time_series_chart(chart: ChartSpec, fallback_html: str) -> str:
     bands_payload: list[JsonValue] = []
     for chart_series in chart.series:
         values_by_timestamp = dict(chart_series.points)
-        data.append([values_by_timestamp.get(timestamp) for timestamp in all_timestamps])
+        data.append(
+            [chart_value(values_by_timestamp.get(timestamp)) for timestamp in all_timestamps]
+        )
         series_payload.append(
             {
                 "name": chart_series.name,
+                "role": aero_chart_series_role(chart_series.name),
                 "color": chart_series.color,
                 "kind": chart_series.kind,
                 "unit": chart_series.unit,
@@ -529,13 +557,16 @@ def render_uplot_time_series_chart(chart: ChartSpec, fallback_html: str) -> str:
             bands_payload.append(
                 {
                     "name": chart_series.name,
+                    "role": aero_chart_series_role(chart_series.name),
                     "color": chart_series.color,
                     "scale": chart_series.scale,
                     "lower": [
-                        min_values_by_timestamp.get(timestamp) for timestamp in all_timestamps
+                        chart_value(min_values_by_timestamp.get(timestamp))
+                        for timestamp in all_timestamps
                     ],
                     "upper": [
-                        max_values_by_timestamp.get(timestamp) for timestamp in all_timestamps
+                        chart_value(max_values_by_timestamp.get(timestamp))
+                        for timestamp in all_timestamps
                     ],
                 }
             )
@@ -584,11 +615,12 @@ def render_uplot_rain_chart(rain_chart: RainChartSpec, fallback_html: str) -> st
         "height": rain_chart.height,
         "data": [
             [chart_timestamp_seconds(timestamp) for timestamp, _value in points],
-            [value for _timestamp, value in points],
+            [chart_value(value) for _timestamp, value in points],
         ],
         "series": [
             {
                 "name": "EA rainfall",
+                "role": "rain",
                 "color": "#2563eb",
                 "kind": "bar",
                 "unit": "mm",
@@ -644,6 +676,12 @@ def render_chart_styles() -> str:
     .interactive-chart .u-over,
     .interactive-chart .u-under {{
       border-radius: 8px;
+    }}
+    .interactive-chart .u-over {{
+      touch-action: pan-y;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
     }}
     .interactive-chart .u-title {{
       display: none;
@@ -708,6 +746,42 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
 
   var latestWindowLabel = "1w";
   var fullWindowLabel = "All";
+  var aeroChartTheme = {
+    roles: {
+      basementRh: "#0b76c2",
+      basementTemp: "#d96608",
+      basementAh: "#0e9c60",
+      outdoorAh: "#8a63e8",
+      rain: "#1e46c9",
+      bedroom: "#c93f8f",
+      livingRoom: "#b07a00",
+      outdoor: "#437fff"
+    },
+    inkMuted: "#4a7391",
+    grid: "rgba(15, 127, 206, 0.14)",
+    event: "rgba(15, 110, 175, 0.55)",
+    bandAlpha: 0.14,
+    axisFont: "12px 'Segoe UI', 'Helvetica Neue', sans-serif",
+    axisLabelFont: "12px 'Segoe UI', 'Helvetica Neue', sans-serif"
+  };
+
+  function isAeroTheme() {
+    return document.body.classList.contains("theme-aero");
+  }
+
+  function themedSeriesColor(series) {
+    if (isAeroTheme() && series.role && aeroChartTheme.roles[series.role]) {
+      return aeroChartTheme.roles[series.role];
+    }
+    return series.color;
+  }
+
+  function themedBandColor(band) {
+    if (isAeroTheme() && band.role && aeroChartTheme.roles[band.role]) {
+      return aeroChartTheme.roles[band.role];
+    }
+    return band.color;
+  }
 
   function formatTimestamp(epochSeconds) {
     if (epochSeconds == null) {
@@ -752,6 +826,23 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
     });
   }
 
+  function drawEventBubbles(plot, xPosition) {
+    var context = plot.ctx;
+    var bottom = plot.bbox.top + plot.bbox.height;
+    var count = 0;
+    for (var yPosition = bottom - 9; yPosition > plot.bbox.top + 8; yPosition -= 26) {
+      var radius = count % 2 === 0 ? 2.4 : 3.4;
+      var offset = count % 2 === 0 ? -2.5 : 2.5;
+      context.beginPath();
+      context.arc(xPosition + offset, yPosition, radius, 0, Math.PI * 2);
+      context.globalAlpha = 0.3;
+      context.fill();
+      context.globalAlpha = 1;
+      context.stroke();
+      count += 1;
+    }
+  }
+
   function eventMarkerPlugin(events) {
     return {
       hooks: {
@@ -764,12 +855,22 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
             var top = plot.bbox.top;
             var bottom = plot.bbox.top + plot.bbox.height;
             context.save();
-            context.strokeStyle = "rgba(55, 65, 81, 0.45)";
+            context.beginPath();
+            context.rect(plot.bbox.left, plot.bbox.top, plot.bbox.width, plot.bbox.height);
+            context.clip();
+            context.strokeStyle = isAeroTheme() ? aeroChartTheme.event : "rgba(55, 65, 81, 0.45)";
+            context.fillStyle = context.strokeStyle;
             context.lineWidth = 1;
-            context.setLineDash([4, 4]);
+            if (!isAeroTheme()) {
+              context.setLineDash([4, 4]);
+            }
             events.forEach(function (event) {
               var xPosition = plot.valToPos(event.timestamp, "x", true);
               if (xPosition >= plot.bbox.left && xPosition <= plot.bbox.left + plot.bbox.width) {
+                if (isAeroTheme()) {
+                  drawEventBubbles(plot, Math.round(xPosition) + 0.5);
+                  return;
+                }
                 context.beginPath();
                 context.moveTo(Math.round(xPosition) + 0.5, top);
                 context.lineTo(Math.round(xPosition) + 0.5, bottom);
@@ -812,7 +913,10 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
             bands.forEach(function (band) {
               var lowerSegment = [];
               var isDrawing = false;
-              context.fillStyle = hexToRgba(band.color, 0.14);
+              context.fillStyle = hexToRgba(
+                themedBandColor(band),
+                isAeroTheme() ? aeroChartTheme.bandAlpha : 0.14
+              );
 
               function finishSegment() {
                 if (!isDrawing || lowerSegment.length < 2) {
@@ -849,8 +953,8 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
                   finishSegment();
                   return;
                 }
-                var upperY = plot.valToPos(upper, "y", true);
-                var lowerY = plot.valToPos(lower, "y", true);
+                var upperY = plot.valToPos(upper, band.scale || "y", true);
+                var lowerY = plot.valToPos(lower, band.scale || "y", true);
                 if (!isDrawing) {
                   context.beginPath();
                   context.moveTo(xPosition, upperY);
@@ -869,6 +973,77 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
     };
   }
 
+  function rainBarPlugin(payload) {
+    if (!isAeroTheme()) {
+      return { hooks: {} };
+    }
+    var barIndex = -1;
+    payload.series.forEach(function (series, index) {
+      if (series.kind === "bar") {
+        barIndex = index;
+      }
+    });
+    if (barIndex === -1) {
+      return { hooks: {} };
+    }
+    var series = payload.series[barIndex];
+    return {
+      hooks: {
+        draw: [
+          function (plot) {
+            var context = plot.ctx;
+            var values = payload.data[barIndex + 1];
+            var timestamps = payload.data[0];
+            var zeroY = plot.valToPos(0, series.scale, true);
+            context.save();
+            context.beginPath();
+            context.rect(plot.bbox.left, plot.bbox.top, plot.bbox.width, plot.bbox.height);
+            context.clip();
+            context.globalCompositeOperation = "destination-over";
+            context.fillStyle = hexToRgba(themedSeriesColor(series), 0.9);
+            timestamps.forEach(function (timestamp, index) {
+              var value = values[index];
+              if (value == null || !Number.isFinite(value) || value <= 0) {
+                return;
+              }
+              var xLeft = plot.valToPos(timestamp - 1700, "x", true);
+              var xRight = plot.valToPos(timestamp + 1700, "x", true);
+              if (xRight < plot.bbox.left - 40 || xLeft > plot.bbox.left + plot.bbox.width + 40) {
+                return;
+              }
+              var yPosition = plot.valToPos(value, series.scale, true);
+              var width = Math.max(1, xRight - xLeft - 1);
+              var height = Math.max(1, zeroY - yPosition);
+              if (typeof context.roundRect === "function" && width >= 2 && height >= 2) {
+                var radius = Math.min(width / 2, 3.5, height);
+                context.beginPath();
+                context.roundRect(xLeft, yPosition, width, height, [radius, radius, 0, 0]);
+                context.fill();
+                return;
+              }
+              context.fillRect(xLeft, yPosition, width, height);
+            });
+            context.restore();
+          }
+        ]
+      }
+    };
+  }
+
+  function waterFill(color) {
+    return function (plot) {
+      var top = plot.bbox.top;
+      var height = plot.bbox.height;
+      if (!Number.isFinite(top) || !Number.isFinite(height) || height <= 0) {
+        return hexToRgba(color, 0.18);
+      }
+      var gradient = plot.ctx.createLinearGradient(0, top, 0, top + height);
+      gradient.addColorStop(0, hexToRgba(color, 0.4));
+      gradient.addColorStop(1, hexToRgba(color, 0.03));
+      return gradient;
+    };
+  }
+
   function makeSeriesOptions(payload) {
     return [
       {
@@ -880,8 +1055,8 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
     ].concat(payload.series.map(function (series) {
       var options = {
         label: series.name,
-        stroke: series.color,
-        fill: series.kind === "bar" ? series.color : undefined,
+        stroke: themedSeriesColor(series),
+        fill: series.kind === "bar" ? themedSeriesColor(series) : undefined,
         width: series.kind === "bar" ? 0 : 2,
         scale: series.scale || "y",
         points: { show: false },
@@ -890,7 +1065,17 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
         }
       };
       if (series.kind === "bar") {
-        options.paths = uPlot.paths.bars({ size: [0.74, Infinity, 1] });
+        options.paths = isAeroTheme()
+          ? function () { return null; }
+          : uPlot.paths.bars({ size: [0.74, Infinity, 1] });
+      }
+      if (
+        isAeroTheme() &&
+        payload.title === "Basement conditions" &&
+        series.role === "basementRh"
+      ) {
+        options.fill = waterFill(themedSeriesColor(series));
+        options.width = 2.5;
       }
       return options;
     }));
@@ -961,7 +1146,13 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
   }
 
   function makeAxes(payload) {
-    return [{}].concat((payload.axes || [{ scale: "y", label: payload.yLabel }]).map(
+    var timeAxis = isAeroTheme() ? {
+      stroke: aeroChartTheme.inkMuted,
+      grid: { stroke: aeroChartTheme.grid, width: 1 },
+      ticks: { stroke: aeroChartTheme.grid, width: 1 },
+      font: aeroChartTheme.axisFont
+    } : {};
+    return [timeAxis].concat((payload.axes || [{ scale: "y", label: payload.yLabel }]).map(
       function (axis) {
         return {
           scale: axis.scale || "y",
@@ -970,7 +1161,13 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
           size: axis.show === false ? 0 : (axis.size || 58),
           values: axis.show === false ? function () { return []; } : undefined,
           ticks: axis.show === false ? { show: false } : undefined,
-          grid: axis.show === false ? { show: false } : undefined
+          grid: axis.show === false
+            ? { show: false }
+            : (isAeroTheme() ? { stroke: aeroChartTheme.grid, width: 1 } : undefined),
+          stroke: isAeroTheme() ? aeroChartTheme.inkMuted : undefined,
+          font: isAeroTheme() ? aeroChartTheme.axisFont : undefined,
+          labelFont: isAeroTheme() ? aeroChartTheme.axisLabelFont : undefined,
+          labelGap: isAeroTheme() ? 4 : undefined
         };
       }
     ));
@@ -1057,6 +1254,111 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
     }, { passive: false });
   }
 
+  function addTouchNavigation(frame, plot, bounds) {
+    var overlay = frame.querySelector(".u-over");
+    if (overlay == null) {
+      return;
+    }
+    var minimumSpanSeconds = 600;
+    var directionSlopPixels = 8;
+    var gesture = null;
+    var touchStart = null;
+    var pinchStartValues = null;
+
+    function overlayLeft(touch) {
+      return touch.clientX - overlay.getBoundingClientRect().left;
+    }
+
+    function scrubTo(touch) {
+      var rect = overlay.getBoundingClientRect();
+      plot.setCursor({
+        left: touch.clientX - rect.left,
+        top: touch.clientY - rect.top
+      });
+    }
+
+    function beginPinch(touches) {
+      gesture = "pinch";
+      pinchStartValues = [
+        plot.posToVal(overlayLeft(touches[0]), "x"),
+        plot.posToVal(overlayLeft(touches[1]), "x")
+      ];
+    }
+
+    function movePinch(touches) {
+      var firstX = overlayLeft(touches[0]);
+      var secondX = overlayLeft(touches[1]);
+      var width = overlay.getBoundingClientRect().width;
+      if (Math.abs(secondX - firstX) < 12 || width <= 0) {
+        return;
+      }
+      var span =
+        ((pinchStartValues[1] - pinchStartValues[0]) * width) / (secondX - firstX);
+      if (!Number.isFinite(span) || span <= 0) {
+        return;
+      }
+      span = Math.max(span, minimumSpanSeconds);
+      var minimum = pinchStartValues[0] - (firstX / width) * span;
+      setRange(plot, minimum, minimum + span, bounds);
+    }
+
+    overlay.addEventListener("touchstart", function (event) {
+      if (event.touches.length >= 2) {
+        event.preventDefault();
+        beginPinch(event.touches);
+        return;
+      }
+      gesture = null;
+      touchStart = { x: event.touches[0].clientX, y: event.touches[0].clientY };
+    }, { passive: false });
+
+    overlay.addEventListener("touchmove", function (event) {
+      if (gesture === "pinch") {
+        if (event.touches.length >= 2) {
+          event.preventDefault();
+          movePinch(event.touches);
+        }
+        return;
+      }
+      if (gesture === "scroll" || touchStart == null || event.touches.length !== 1) {
+        return;
+      }
+      var touch = event.touches[0];
+      if (gesture == null) {
+        var deltaX = Math.abs(touch.clientX - touchStart.x);
+        var deltaY = Math.abs(touch.clientY - touchStart.y);
+        if (Math.max(deltaX, deltaY) < directionSlopPixels) {
+          return;
+        }
+        gesture = deltaX > deltaY ? "scrub" : "scroll";
+      }
+      if (gesture === "scrub") {
+        event.preventDefault();
+        scrubTo(touch);
+      }
+    }, { passive: false });
+
+    function endTouch(event) {
+      if (gesture == null && touchStart != null && event.changedTouches.length > 0) {
+        scrubTo(event.changedTouches[0]);
+      }
+      if (event.touches.length === 0) {
+        gesture = null;
+        touchStart = null;
+        pinchStartValues = null;
+        return;
+      }
+      if (gesture === "pinch" && event.touches.length >= 2) {
+        beginPinch(event.touches);
+        return;
+      }
+      gesture = "scroll";
+    }
+
+    overlay.addEventListener("touchend", endTouch);
+    overlay.addEventListener("touchcancel", endTouch);
+  }
+
   function renderChart(frame) {
     var payloadScript = document.getElementById(frame.dataset.chartPayload);
     if (payloadScript == null) {
@@ -1080,12 +1382,15 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
       series: makeSeriesOptions(payload),
       plugins: [
         rangeBandPlugin(payload.bands || [], payload.data[0]),
+        rainBarPlugin(payload),
         eventMarkerPlugin(payload.events)
       ]
     };
     var plot = new uPlot(options, payload.data, host);
+    frame.chartPlot = plot;
     addRangeControls(frame, plot, bounds);
     addWheelNavigation(frame, plot, bounds);
+    addTouchNavigation(frame, plot, bounds);
     if ("ResizeObserver" in window) {
       new ResizeObserver(function () {
         plot.setSize({
@@ -1167,165 +1472,645 @@ def render_metric_card(label: str, value: str) -> str:
     )
 
 
+def latest_basement_readout(summary: SiteAnalysisSummary, metric_name: str) -> str:
+    chart = summary.dashboard_charts[0]
+    matching_series = next(
+        series for series in chart.series if series.name == f"Basement {metric_name}"
+    )
+    if not matching_series.points:
+        return "n/a"
+    return format_optional_float(matching_series.points[-1][1], 1)
+
+
+def render_aero_readouts(summary: SiteAnalysisSummary) -> str:
+    relative_humidity = latest_basement_readout(summary, "relative humidity")
+    temperature = latest_basement_readout(summary, "temperature")
+    humidity_fill = "50%" if relative_humidity == "n/a" else f"{relative_humidity}%"
+    return f"""
+    <section class="readouts" aria-label="Current basement conditions">
+      <div class="readout readout-humidity" style="--fill: {html.escape(humidity_fill)}">
+        <div class="readout-value">{html.escape(relative_humidity)}<span>%</span></div>
+        <div class="readout-label">Basement relative humidity</div>
+      </div>
+      <div class="readout readout-temperature">
+        <div class="readout-value">{html.escape(temperature)}<span>C</span></div>
+        <div class="readout-label">Basement temperature</div>
+      </div>
+    </section>
+    """
+
+
+def render_aero_chart_card(chart: ChartSpec) -> str:
+    return f"""
+    <section class="chart-card">
+      <div class="chart-head"><h2>{html.escape(chart.title)}</h2></div>
+      {render_chart_spec(chart)}
+    </section>
+    """
+
+
+def frutiger_aero_asset_path(filename: str) -> str:
+    return f"{FRUTIGER_AERO_ASSET_PREFIX}/{filename}"
+
+
+def render_aero_bubbles() -> str:
+    bubbles = (
+        ("18px", "8%", "13s", "-3s"),
+        ("34px", "23%", "17s", "-9s"),
+        ("12px", "44%", "11s", "-6s"),
+        ("26px", "62%", "15s", "-1s"),
+        ("42px", "78%", "19s", "-12s"),
+        ("16px", "91%", "12s", "-8s"),
+    )
+    return "\n".join(
+        (
+            '    <div class="aero-underbubble" '
+            f'style="width:{size};height:{size};left:{left};'
+            f'animation-duration:{duration};animation-delay:{delay}"></div>'
+        )
+        for size, left, duration, delay in bubbles
+    )
+
+
 def render_index_html(summary: SiteAnalysisSummary) -> str:
-    cards_html = "\n".join(
-        render_metric_card(card.label, card.value) for card in summary.metric_cards
-    )
-    charts_html = "\n".join(
-        f"<h2>{html.escape(chart.title)}</h2>\n{render_chart_spec(chart)}"
-        for chart in summary.dashboard_charts
-    )
-    generated_at = format_timestamp(summary.metadata.generated_at)
+    charts_html = "\n".join(render_aero_chart_card(chart) for chart in summary.dashboard_charts)
+    latest_reading = format_timestamp(summary.metadata.data_window_end)
+    scene_960 = frutiger_aero_asset_path("tall-scene-960.webp")
+    scene_1440 = frutiger_aero_asset_path("tall-scene-1440.webp")
+    scene_2048 = frutiger_aero_asset_path("tall-scene-2048.webp")
+    floor_image = frutiger_aero_asset_path("floor-strip.webp")
+    dehumidifier_image = frutiger_aero_asset_path("dehumidifier.webp")
+    goldfish_image = frutiger_aero_asset_path("goldfish.webp")
+    dragonfly_image = frutiger_aero_asset_path("dragonfly.webp")
     return f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Basement Dampness</title>
+  <title>Watch a basement dry</title>
   <link rel="icon" href="data:,">
   <style>
     {render_chart_styles()}
     :root {{
       color-scheme: light;
-      --ink: #18212f;
-      --muted: #5d6878;
-      --line: #d8dee8;
-      --soft: #f4f7f9;
-      --accent: #1f766f;
+      --ink: #123a55;
+      --muted: #4a7391;
+      --line: rgba(109, 188, 224, 0.46);
+      --accent: #0f7fce;
+      --scene-image: url("{scene_1440}");
+      --floor-image: url("{floor_image}");
+      --dehumidifier-image: url("{dehumidifier_image}");
+      --goldfish-image: url("{goldfish_image}");
+      --dragonfly-image: url("{dragonfly_image}");
+      --waterline-y: 92vh;
+      --scene-height: 150vw;
+      --scene-waterline: 94.5vw;
+      --scene-top: calc(var(--waterline-y) - var(--scene-waterline));
+      --scene-bottom: calc(var(--waterline-y) + var(--scene-height) - var(--scene-waterline));
     }}
     * {{ box-sizing: border-box; }}
+    html {{ min-height: 100%; }}
     body {{
       margin: 0;
-      font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      min-height: 100%;
+      overflow-x: hidden;
+      position: relative;
+      font: 14px/1.45 "Segoe UI", "Helvetica Neue", -apple-system, BlinkMacSystemFont,
+        sans-serif;
       color: var(--ink);
-      background: #ffffff;
+      background: #073a58;
+    }}
+    body::after {{
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(0,0,0,0) 36%),
+        radial-gradient(70vw 60vw at 78% 18%, rgba(184, 247, 255, 0.22), rgba(184, 247, 255, 0));
+      z-index: 5;
+    }}
+    .aero-scene-wrap {{
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: var(--scene-bottom);
+      overflow: hidden;
+      pointer-events: none;
+    }}
+    .aero-sky-extend {{
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(56vw 56vw at 15vw calc(var(--scene-top) + 21vw),
+          rgba(190, 235, 255, 0.6), rgba(190, 235, 255, 0) 70%),
+        linear-gradient(90deg, rgba(150, 215, 255, 0.35), rgba(150, 215, 255, 0) 40%,
+          rgba(2, 45, 140, 0.25)),
+        linear-gradient(180deg, #0143a0 0%, #0062d7 var(--scene-top), #0062d7 100%);
+    }}
+    .aero-scene {{
+      position: absolute;
+      top: var(--scene-top);
+      left: 0;
+      width: 100%;
+      height: var(--scene-height);
+      background: var(--scene-image) center / 100% 100% no-repeat;
+      mask-image: linear-gradient(180deg, transparent 0, #000 56px);
+    }}
+    .aero-scene-fade {{
+      position: absolute;
+      left: 0;
+      width: 100%;
+      height: 22vw;
+      top: calc(var(--scene-bottom) - 22vw);
+      background: linear-gradient(180deg, rgba(6, 65, 110, 0), #06416e 96%);
+    }}
+    .aero-deep {{
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      pointer-events: none;
+      background: linear-gradient(180deg,
+        rgba(6, 65, 110, 0) 0,
+        rgba(6, 65, 110, 0) var(--scene-bottom),
+        #06416e var(--scene-bottom),
+        #052c46 72%,
+        #04202f 100%);
+    }}
+    .page {{
+      position: relative;
+      z-index: 2;
+      max-width: 1060px;
+      margin: 0 auto;
+      padding: 0 20px 300px;
+    }}
+    .zone-art {{
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 50%;
+      width: 100vw;
+      transform: translateX(-50%);
+      z-index: -1;
+      overflow: hidden;
+      pointer-events: none;
+    }}
+    .zone-sky {{
+      position: relative;
+      min-height: 100vh;
+      padding-top: 0;
+    }}
+    .zone-under {{
+      position: relative;
+      padding-top: 4vh;
     }}
     header {{
-      border-bottom: 1px solid var(--line);
-      padding: 18px 22px 14px;
-    }}
-    main {{
-      max-width: 1180px;
-      padding: 18px 22px 36px;
+      text-align: center;
+      padding-top: 9vh;
     }}
     h1 {{
-      margin: 0 0 4px;
-      font-size: 24px;
+      margin: 0;
+      font-size: clamp(38px, 5.4vw, 58px);
+      font-weight: 650;
+      line-height: 1.05;
       letter-spacing: 0;
+      background: linear-gradient(180deg, #04365f, #0a63a8 42%, #2ea3dc 72%, #8fdcf8);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      filter: drop-shadow(0 1px 0 rgba(255,255,255,0.95))
+        drop-shadow(0 2px 2px rgba(255,255,255,0.55))
+        drop-shadow(0 8px 22px rgba(8,70,125,0.4));
     }}
     h2 {{
-      margin: 28px 0 10px;
-      font-size: 18px;
-      letter-spacing: 0;
-    }}
-    h3 {{
-      margin: 0 0 7px;
-      font-size: 14px;
-      letter-spacing: 0;
-    }}
-    .subtle {{ color: var(--muted); }}
-    a {{ color: var(--accent); }}
-    .cards {{
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(172px, 1fr));
-      gap: 10px;
-      margin: 0 0 18px;
-    }}
-    .card, .panel {{
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 11px 12px;
-      background: #fff;
-    }}
-    .label {{
-      color: var(--muted);
-      font-size: 12px;
-    }}
-    .value {{
-      margin-top: 5px;
-      font-size: 20px;
+      margin: 0;
+      font-size: 17px;
       font-weight: 650;
       letter-spacing: 0;
-      overflow-wrap: anywhere;
+      color: #0b5f9e;
     }}
-    .panel-grid {{
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-      gap: 10px;
-    }}
-    .panel p {{ margin: 0; color: var(--muted); }}
-    .chart {{
-      display: block;
-      width: 100%;
-      height: auto;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #fff;
-    }}
-    .short-chart {{ margin-top: 8px; }}
-    .plot-bg {{ fill: #fbfcfd; }}
-    .grid {{ stroke: #e7ebf0; stroke-width: 1; }}
-    .axis {{ stroke: #9aa4b2; stroke-width: 1; }}
-    .event-line {{ stroke: #374151; stroke-width: 1; stroke-dasharray: 4 4; opacity: .5; }}
-    .series-line {{ fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; }}
-    .axis-label, .axis-title {{ fill: var(--muted); font-size: 12px; }}
-    .rain-bar {{ fill: #2563eb; opacity: .72; }}
-    .legend {{
+    a {{ color: var(--accent); }}
+    .readouts {{
       display: flex;
+      justify-content: center;
       flex-wrap: wrap;
-      gap: 10px 16px;
-      margin: 5px 0 7px;
-      color: var(--muted);
+      gap: 36px;
+      margin: 7vh 0 30px;
     }}
-    .legend-item {{
-      display: inline-flex;
+    .readout {{
+      position: relative;
+      flex: 0 0 236px;
+      width: 236px;
+      height: 236px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
       align-items: center;
-      gap: 6px;
+      justify-content: center;
+      padding: 0 26px;
+      border: 1px solid rgba(255,255,255,0.95);
+      border-radius: 50%;
+      text-align: center;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 14px 34px rgba(12,80,130,0.35),
+        0 0 26px rgba(140,220,255,0.4),
+        inset 0 2px 2px rgba(255,255,255,0.95),
+        inset 0 -14px 26px rgba(90,180,230,0.35),
+        0 40px 30px -22px rgba(25,140,205,0.45);
     }}
-    .legend-swatch {{
-      display: inline-block;
-      width: 22px;
-      height: 3px;
+    .readout-humidity {{
+      background: radial-gradient(circle at 32% 26%, rgba(255,255,255,0.9),
+        rgba(225,246,255,0.55) 32%, rgba(170,220,248,0.4) 62%,
+        rgba(125,195,238,0.55));
     }}
-    table {{
-      width: 100%;
-      border-collapse: collapse;
+    .readout-humidity::before {{
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: var(--fill, 50%);
+      background: linear-gradient(180deg, rgba(110,210,252,0.6), rgba(25,132,202,0.72));
+      border-radius: 46% 54% 0 0 / 16px 20px 0 0;
+      box-shadow: inset 0 3px 3px -1px rgba(255,255,255,0.95);
+      animation: water-slosh 7s ease-in-out infinite alternate;
+    }}
+    .readout-temperature {{
+      background: radial-gradient(circle at 32% 26%, rgba(255,255,255,0.92),
+        rgba(255,238,205,0.6) 34%, rgba(252,195,115,0.5) 66%,
+        rgba(240,150,55,0.6));
+      box-shadow: 0 14px 34px rgba(140,85,15,0.3),
+        0 0 26px rgba(255,205,130,0.45),
+        inset 0 2px 2px rgba(255,255,255,0.95),
+        inset 0 -14px 26px rgba(235,155,60,0.4),
+        0 40px 30px -22px rgba(220,140,45,0.4);
+    }}
+    .readout::after {{
+      content: "";
+      position: absolute;
+      left: 19%;
+      right: 19%;
+      top: 7%;
+      height: 30%;
+      border-radius: 50%;
+      background: linear-gradient(180deg, rgba(255,255,255,0.95), rgba(255,255,255,0.05));
+    }}
+    .readout-value {{
+      position: relative;
+      z-index: 1;
+      font-size: 54px;
+      font-weight: 300;
+      line-height: 1;
+      color: #084a80;
+      text-shadow: 0 1px 0 rgba(255,255,255,0.85);
+      font-variant-numeric: tabular-nums;
+    }}
+    .readout-temperature .readout-value {{ color: #a34a02; }}
+    .readout-value span {{
+      margin-left: 4px;
+      font-size: 24px;
+      opacity: 0.75;
+    }}
+    .readout-label {{
+      position: relative;
+      z-index: 1;
+      margin-top: 8px;
       font-size: 13px;
+      color: #275b7e;
     }}
-    th, td {{
-      border-bottom: 1px solid var(--line);
-      padding: 7px 8px;
-      text-align: right;
-      white-space: nowrap;
+    .readout-temperature .readout-label {{ color: #7c4a14; }}
+    @keyframes water-slosh {{
+      from {{ border-radius: 46% 54% 0 0 / 18px 12px 0 0; }}
+      to {{ border-radius: 54% 46% 0 0 / 12px 18px 0 0; }}
     }}
-    th:first-child, td:first-child {{ text-align: left; }}
-    .table-wrap {{ overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }}
+    .aero-scroll-hint {{
+      position: absolute;
+      left: 50%;
+      top: 74vh;
+      transform: translateX(-50%);
+    }}
+    .aero-scroll-hint span {{
+      display: block;
+      width: 26px;
+      height: 26px;
+      border-right: 6px solid rgba(255,255,255,0.95);
+      border-bottom: 6px solid rgba(255,255,255,0.95);
+      border-radius: 3px;
+      filter: drop-shadow(0 3px 10px rgba(8,70,125,0.6));
+      animation: hint-bob 1.8s ease-in-out infinite;
+    }}
+    @keyframes hint-bob {{
+      0%, 100% {{ transform: rotate(45deg) translate(0, 0); opacity: 0.8; }}
+      50% {{ transform: rotate(45deg) translate(7px, 7px); opacity: 1; }}
+    }}
+    .aero-aurora {{
+      position: absolute;
+      height: 240px;
+      width: 150%;
+      left: -25%;
+      background: linear-gradient(100deg, transparent 8%, rgba(130,255,225,0.28) 30%,
+        rgba(150,195,255,0.32) 52%, rgba(255,190,245,0.24) 72%, transparent 92%);
+      filter: blur(28px);
+      mix-blend-mode: screen;
+      animation: aurora-drift 16s ease-in-out infinite alternate;
+    }}
+    .aero-aurora.aurora-2 {{
+      animation-duration: 23s;
+      animation-delay: -8s;
+      opacity: 0.7;
+    }}
+    @keyframes aurora-drift {{
+      from {{ transform: rotate(-7deg) translateX(-50px); }}
+      to {{ transform: rotate(-4deg) translateX(50px); }}
+    }}
+    .aero-bokeh {{
+      position: absolute;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 30%, rgba(255,255,255,0.95),
+        rgba(255,255,255,0.25) 55%, transparent 72%);
+      filter: blur(1.5px);
+      opacity: 0.55;
+      animation: bokeh-drift ease-in-out infinite alternate;
+    }}
+    @keyframes bokeh-drift {{
+      from {{ transform: translate(0, 0); }}
+      to {{ transform: translate(26px, -34px); }}
+    }}
+    .aero-dragonfly {{
+      position: absolute;
+      top: 56vh;
+      right: 6%;
+      width: 148px;
+      aspect-ratio: 512 / 342;
+      background: var(--dragonfly-image) center / contain no-repeat;
+      transform: rotate(-8deg);
+      z-index: 2;
+      pointer-events: none;
+      filter: drop-shadow(0 8px 12px rgba(20,70,110,0.35));
+      animation: dragonfly-hover 3.2s ease-in-out infinite alternate;
+    }}
+    @keyframes dragonfly-hover {{
+      from {{ transform: rotate(-8deg) translateY(0); }}
+      to {{ transform: rotate(-6deg) translateY(6px); }}
+    }}
+    .aero-fish-sky,
+    .aero-fish-deep {{
+      position: absolute;
+      width: clamp(110px, 14vw, 185px);
+      aspect-ratio: 640 / 480;
+      background: var(--goldfish-image) center / contain no-repeat;
+      pointer-events: none;
+    }}
+    .aero-fish-sky {{
+      right: 5%;
+      top: 330px;
+      filter: drop-shadow(0 10px 16px rgba(10,70,120,0.35));
+      animation: fish-swim 11s ease-in-out infinite alternate;
+    }}
+    .aero-fish-deep {{
+      top: calc(100vh + 34vw);
+      left: 8%;
+      filter: brightness(0.35) saturate(0.4) blur(1.5px);
+      opacity: 0.5;
+      transform: scaleX(-1);
+      animation: fish-deep-drift 70s ease-in-out infinite alternate;
+    }}
+    @keyframes fish-swim {{
+      from {{ transform: translate(0, 0) rotate(-5deg); }}
+      to {{ transform: translate(-70px, 26px) rotate(3deg); }}
+    }}
+    @keyframes fish-deep-drift {{
+      from {{ transform: scaleX(-1) translate(0, 0); }}
+      to {{ transform: scaleX(-1) translate(-58vw, 40px); }}
+    }}
+    .aero-underbubble {{
+      position: absolute;
+      bottom: -70px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 32% 28%, rgba(255,255,255,0.9),
+        rgba(255,255,255,0.28) 24%, rgba(190,235,255,0.12) 60%,
+        rgba(160,220,250,0.3));
+      border: 1px solid rgba(255,255,255,0.5);
+      box-shadow: inset -5px -7px 14px rgba(120,200,240,0.3);
+      animation: bubble-rise linear infinite;
+    }}
+    @keyframes bubble-rise {{
+      0% {{ transform: translate(0, 0); opacity: 0; }}
+      8% {{ opacity: 0.9; }}
+      100% {{ transform: translate(26px, -1600px); opacity: 0; }}
+    }}
+    .aero-deep-floor {{
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: min(240px, 30vw);
+      background: var(--floor-image) bottom center / auto 100% repeat-x;
+      mask-image: linear-gradient(180deg, transparent 0%, #000 60%);
+    }}
+    .aero-deep-floor::after {{
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(180deg, rgba(4,30,48,0.72),
+        rgba(6,45,70,0.5) 45%, rgba(8,55,84,0.4));
+    }}
+    .aero-dehumidifier {{
+      position: absolute;
+      right: 6%;
+      bottom: min(88px, 11vw);
+      width: clamp(130px, 15vw, 200px);
+      aspect-ratio: 640 / 427;
+      background: var(--dehumidifier-image) bottom / contain no-repeat;
+      filter: brightness(0.88) saturate(0.92) drop-shadow(0 12px 16px rgba(2,18,30,0.6));
+    }}
+    .chart-card {{
+      position: relative;
+      margin-bottom: 26px;
+      padding: 16px 18px 10px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.95);
+      border-radius: 22px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.88), rgba(255,255,255,0.7));
+      backdrop-filter: blur(20px) saturate(1.2);
+      box-shadow: 0 12px 36px rgba(10,70,120,0.28),
+        0 0 0 1px rgba(150,225,255,0.35),
+        0 0 30px rgba(120,210,255,0.35),
+        inset 0 1px 0 rgba(255,255,255,0.95),
+        inset 0 -12px 20px rgba(150,215,245,0.3);
+    }}
+    .chart-card::before {{
+      content: "";
+      position: absolute;
+      left: 14px;
+      right: 14px;
+      top: 0;
+      height: 54px;
+      border-radius: 16px 16px 28px 28px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.65), rgba(255,255,255,0.06));
+      pointer-events: none;
+    }}
+    .chart-card::after {{
+      content: "";
+      position: absolute;
+      top: -20px;
+      bottom: -20px;
+      left: 0;
+      width: 46%;
+      background: linear-gradient(105deg, transparent 20%, rgba(255,255,255,0.5) 50%,
+        transparent 80%);
+      transform: translateX(-130%) skewX(-18deg);
+      pointer-events: none;
+      animation: sheen-sweep 1.7s ease-out 0.5s 1 both;
+    }}
+    .chart-card:hover::after {{
+      animation: sheen-sweep-again 1.1s ease-out 1 both;
+    }}
+    @keyframes sheen-sweep {{
+      to {{ transform: translateX(320%) skewX(-18deg); }}
+    }}
+    @keyframes sheen-sweep-again {{
+      from {{ transform: translateX(-130%) skewX(-18deg); }}
+      to {{ transform: translateX(320%) skewX(-18deg); }}
+    }}
+    .chart-head,
+    .chart-frame {{
+      position: relative;
+      z-index: 1;
+    }}
+    .chart-head {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 6px;
+    }}
+    .interactive-chart .uplot {{
+      border-color: rgba(109,188,224,0.42);
+      background: rgba(255,255,255,0.88);
+    }}
+    .interactive-chart .u-legend {{
+      color: var(--ink);
+      font-size: 12px;
+    }}
+    .chart-actions button {{
+      border-color: #79c3e3;
+      border-radius: 999px;
+      background: linear-gradient(180deg, #f4fdff, #c9effd 42%, #8edcf8 58%, #cdf3ff);
+      color: #0b5f9e;
+      font-weight: 650;
+      padding: 5px 18px;
+      box-shadow: 0 3px 8px rgba(20,90,140,0.3), inset 0 1px 0 rgba(255,255,255,0.95),
+        inset 0 -5px 8px rgba(70,170,220,0.35),
+        0 10px 10px -6px rgba(120,210,255,0.5);
+    }}
+    .chart-actions button[aria-pressed="true"] {{
+      border-color: #0a6cb4;
+      background: linear-gradient(180deg, #6fd0f2, #0f7fce 52%, #0a6cb4 60%, #4db6e6);
+      color: #fff;
+      box-shadow: 0 3px 10px rgba(10,90,150,0.45),
+        inset 0 1px 0 rgba(255,255,255,0.6),
+        inset 0 -5px 10px rgba(6,60,105,0.4),
+        0 10px 10px -6px rgba(60,180,240,0.55);
+    }}
+    footer {{
+      position: relative;
+      z-index: 1;
+      margin-top: 34px;
+      padding: 12px 18px;
+      border: 1px solid rgba(170,230,255,0.4);
+      border-radius: 16px;
+      color: #e9f7ff;
+      font-size: 13.5px;
+      background: linear-gradient(180deg, rgba(10,55,84,0.55), rgba(7,40,62,0.75));
+      backdrop-filter: blur(12px);
+      box-shadow: 0 10px 28px rgba(3,25,40,0.5), inset 0 1px 0 rgba(200,240,255,0.35);
+    }}
+    footer p {{
+      margin: 4px 0;
+    }}
+    .sources {{
+      color: #b9dcef;
+    }}
+    @media (min-width: 1400px) {{
+      :root {{ --scene-image: url("{scene_2048}"); }}
+    }}
     @media (max-width: 760px) {{
-      header, main {{ padding-left: 14px; padding-right: 14px; }}
-      h1 {{ font-size: 21px; }}
-      .value {{ font-size: 18px; }}
+      :root {{
+        --scene-image: url("{scene_960}");
+        --scene-height: 180vw;
+        --scene-waterline: 113vw;
+      }}
+      .page {{ padding-left: 14px; padding-right: 14px; }}
+      header {{ padding-top: 7vh; }}
+      .readouts {{ gap: 18px; }}
+      .readout {{
+        flex-basis: 196px;
+        width: 196px;
+        height: 196px;
+      }}
+      .readout-value {{ font-size: 44px; }}
+      .aero-dragonfly {{ display: none; }}
+      .chart-card {{ padding: 12px 10px 8px; }}
+      .chart-head {{
+        align-items: flex-start;
+        flex-direction: column;
+      }}
+      .chart-actions {{
+        justify-content: flex-start;
+        width: 100%;
+      }}
+    }}
+    @media (prefers-reduced-motion: reduce) {{
+      *,
+      *::before,
+      *::after {{
+        animation: none !important;
+      }}
     }}
   </style>
 </head>
-<body>
-  <header>
-    <h1>Basement dampness</h1>
-    <div class="subtle">
-      Updated {generated_at}; STH51 sensors, Open-Meteo humidity, and Environment Agency rainfall.
+<body class="theme-aero">
+  <div class="aero-scene-wrap" aria-hidden="true">
+    <div class="aero-sky-extend"></div>
+    <div class="aero-scene"></div>
+    <div class="aero-scene-fade"></div>
+  </div>
+  <div class="aero-deep" aria-hidden="true">
+{render_aero_bubbles()}
+    <div class="aero-fish-deep"></div>
+    <div class="aero-deep-floor"></div>
+    <div class="aero-dehumidifier"></div>
+  </div>
+  <main class="page">
+    <div class="zone-sky">
+      <div class="zone-art" aria-hidden="true">
+        <div class="aero-aurora" style="top: 130px"></div>
+        <div class="aero-aurora aurora-2" style="top: 420px"></div>
+        <div class="aero-bokeh"
+          style="width:84px;height:84px;left:6%;top:16%;animation-duration:9s"></div>
+        <div class="aero-bokeh"
+          style="width:38px;height:38px;left:16%;top:38%;animation-duration:13s"></div>
+        <div class="aero-bokeh"
+          style="width:56px;height:56px;right:9%;top:24%;animation-duration:11s"></div>
+        <div class="aero-bokeh"
+          style="width:26px;height:26px;right:20%;top:52%;animation-duration:8s"></div>
+        <div class="aero-fish-sky" style="right:5%;top:330px"></div>
+      </div>
+      <div class="aero-dragonfly" aria-hidden="true"></div>
+      <header><h1>Watch a basement dry</h1></header>
+      {render_aero_readouts(summary)}
+      <div class="aero-scroll-hint" aria-hidden="true"><span></span></div>
     </div>
-  </header>
-  <main>
-    <section class="cards">
-      {cards_html}
-    </section>
-
-    <h2>Hypothesis Evidence</h2>
-    <section class="panel-grid">{render_hypothesis_panel(summary)}</section>
-
-    {charts_html}
-
-    <h2>Event-Bounded Period Metrics</h2>
-    <div class="table-wrap">{render_period_table(summary.period_summaries)}</div>
+    <div class="zone-under">
+      {charts_html}
+      <footer>
+        <p>Data to {latest_reading}</p>
+        <p class="sources">Indoor readings come from thermometer-hygrometer sensors in the
+        basement, bedroom, and living room. Outdoor humidity comes from the Open-Meteo weather
+        archive. Rainfall comes from a nearby Environment Agency rain gauge.</p>
+      </footer>
+    </div>
   </main>
   {render_chart_runtime_scripts()}
 </body>
