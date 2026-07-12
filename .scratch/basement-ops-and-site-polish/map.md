@@ -50,6 +50,12 @@ Standing preferences and constraints:
 - The dashboard is the only design target; the physics report comes off the web entirely
   (locally rendered artifact only — unpublishing is implementation work carried by
   [ticket 12](issues/12-grill-mockup-winner-and-implementation.md)).
+- 2026-07-11 fidelity lesson: implementation tickets must carry design-spec details **verbatim**
+  (exact label strings, unit glyphs, reference-file pointers), not paraphrased acceptance
+  criteria, and porting work must diff rendered output against the prototype reference files —
+  tickets 18/19 paraphrased and drifted (axis "{quantity} / {unit}" rule lost, chart skin
+  under-ported), which
+  [ticket 23](issues/23-close-prototype-fidelity-gaps.md) now corrects before the deploy gate.
 - Key review facts: EA rainfall API retains only ~4 weeks (station `270397`); Open-Meteo archive
   covers full history and currently returns no nulls; the pipeline bucket holds stale `site/`
   prefix objects; GitHub disables cron workflows in public repos after 60 days without activity;
@@ -157,6 +163,12 @@ Standing preferences and constraints:
   zoom/pan, with `touch-action: pan-y` keeping page scroll with the browser; desktop hover,
   wheel zoom/pan, drag-select, and range buttons verified unchanged via a 19-check Playwright
   run at 1440x900 and 390x844 ([script](assets/ticket-20-verify-touch.mjs)).
+- [Close production fidelity gaps against the accepted prototype](issues/23-close-prototype-fidelity-gaps.md) —
+  per-measure "{quantity} / {unit}" axes with exact glyphs and `mm per hour` rainfall landed
+  verbatim, and iterative side-by-side screenshot rounds ported the remaining prototype chart
+  skin (concise legends, title-row gel buttons, borderless canvas, fixed full-history rain
+  scale, prototype heights); Rob accepted parity 2026-07-12; also fixed the private report's
+  charts, broken since the ticket-19 port by uPlot's explicit-undefined axis-font crash.
 
 ## Not yet specified
 
