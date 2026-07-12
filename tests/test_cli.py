@@ -48,17 +48,19 @@ def test_build_site_command_writes_timing_record_and_build_info(
         curated_dataset_dir: CuratedDataRoot | None = None,
         rebuild_curated_dataset: bool = True,
         phase_recorder: PhaseRecorder | None = None,
+        include_private_report: bool = False,
     ) -> BuildResult:
         assert data_dir == Path("data")
         assert refresh_weather is False
         assert curated_dataset_dir == tmp_path / "curated"
         assert rebuild_curated_dataset is False
+        assert include_private_report is False
         if phase_recorder is not None:
             with phase_recorder.phase("render-site"):
                 pass
         return BuildResult(
             index_path=output_dir / "index.html",
-            report_path=output_dir / "physics-report.html",
+            private_report_path=None,
             curated_dataset_dir=tmp_path / "curated",
             sensor_row_count=100,
             weather_hour_count=24,

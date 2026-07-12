@@ -34,7 +34,6 @@ Use a private pipeline R2 bucket for ingest and analytical data:
 Use a separate private site R2 bucket for publication:
 
 - `index.html`: generated dashboard.
-- `physics-report.html`: generated physics/metrology report.
 
 The separation is deliberate blast-radius reduction: the public-facing Worker binds only to the
 site bucket, so a routing bug cannot expose raw email, CSV, manifest, or Parquet objects.
@@ -91,8 +90,9 @@ adding D1 or Durable Objects.
 The hosted analysis job is a GitHub Actions workflow in the public
 `robjhornby/basement-plant` repository. It runs `uv run basement --reuse-curated` with DuckDB
 reading `s3://basement-pipeline/parquet` directly through R2's S3-compatible endpoint, then writes
-the rendered `index.html` and `physics-report.html` files to the dedicated `basement-site` bucket
-using R2 S3-compatible credentials scoped to the pipeline and site buckets.
+the rendered `index.html` file to the dedicated `basement-site` bucket using R2 S3-compatible
+credentials scoped to the pipeline and site buckets. The local physics/metrology report remains a
+private opt-in render and is not published.
 
 This replaces the rejected Cloudflare Container path: Containers require the Workers Paid plan,
 and free Workers cannot host the Python/DuckDB analysis workload.
@@ -104,7 +104,6 @@ the `basement-site` bucket on `robjhornby.com/basement*` and serves only:
 
 - `/basement` -> `/basement/` (`308`)
 - `/basement/` and `/basement/index.html` -> `index.html`
-- `/basement/physics-report.html` -> `physics-report.html`
 
 Pages and Workers static assets are intentionally not used because they couple daily content
 publishes to a Wrangler/Node code deploy. The Worker code deploy is rare; daily publication is just

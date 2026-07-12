@@ -10,7 +10,10 @@ from basement_analysis.static_site import (
     fetch_open_meteo_weather,
     render_index_html,
     render_physics_report_html,
+    render_private_report_pages,
+    render_site_assets,
     render_site_pages,
+    write_site_assets,
     write_site_pages,
 )
 from basement_analysis.summaries import (
@@ -157,8 +160,123 @@ def test_site_analysis_summary_builds_shared_dashboard_and_report_values() -> No
     assert summary.rain_chart.hourly_points == (
         (datetime.fromisoformat("2026-07-02T22:00:00"), 1.0),
     )
-    assert summary.dashboard_charts[0].title == "Daily Basement Trends"
+    assert [chart.title for chart in summary.dashboard_charts] == [
+        "Basement conditions",
+        "Absolute humidity",
+        "Temperature",
+        "Relative humidity",
+    ]
     assert "event timestamp uncertainty" in summary.period_summaries[-1].comparability_flags
+
+
+def test_dashboard_chart_payload_matches_final_redesign_lineup() -> None:
+    summary = build_site_analysis_summary(
+        sensor_readings=[
+            sensor_reading("2026-07-02T22:03:00", "Basement", 19.0, 70.0),
+            sensor_reading("2026-07-02T22:03:00", "Bedroom", 20.0, 60.0),
+            sensor_reading("2026-07-02T22:03:00", "Living room", 21.0, 58.0),
+        ],
+        events=[],
+        weather_hours=[weather_hour("2026-07-02T22:00:00", 17.0, 68.0)],
+        rain_readings=[RainReading(datetime.fromisoformat("2026-07-02T22:10:00"), 0.4)],
+        generated_at=datetime.fromisoformat("2026-07-05T12:00:00"),
+    )
+
+    dashboard_html = render_index_html(summary)
+    payloads = [
+        chart_payload(dashboard_html, title)
+        for title in (
+            "Basement conditions",
+            "Absolute humidity",
+            "Temperature",
+            "Relative humidity",
+        )
+    ]
+    series_by_title = {
+        str(payload["title"]): [
+            str(series["name"]) for series in cast(list[dict[str, object]], payload["series"])
+        ]
+        for payload in payloads
+    }
+    absolute_humidity_payload = chart_payload(dashboard_html, "Absolute humidity")
+    absolute_humidity_series = cast(list[dict[str, object]], absolute_humidity_payload["series"])
+    rain_series = absolute_humidity_series[-1]
+    axes = cast(list[dict[str, object]], absolute_humidity_payload["axes"])
+
+    assert series_by_title == {
+        "Basement conditions": ["Relative humidity", "Temperature"],
+        "Absolute humidity": ["Basement", "Bedroom", "Living room", "Outdoor", "Rainfall"],
+        "Temperature": ["Basement", "Bedroom", "Living room", "Outdoor"],
+        "Relative humidity": ["Basement", "Bedroom", "Living room", "Outdoor"],
+    }
+    assert all(series["unit"] for series in absolute_humidity_series)
+    assert rain_series["kind"] == "bar"
+    assert rain_series["scale"] == "rain"
+    assert rain_series["unit"] == "mm per hour"
+    assert axes == [
+        {
+            "scale": "ah",
+            "label": "Absolute humidity / g/m³",
+            "side": "left",
+            "show": True,
+            "size": 56,
+        },
+        {"scale": "rain", "label": "", "side": "right", "show": False, "size": 0},
+    ]
+    assert "Daily Basement Trends" not in dashboard_html
+    assert "Basement Versus Outdoor Moisture" not in dashboard_html
+    assert "Raw Sensor Context" not in dashboard_html
+    assert "formatSeriesValueWithUnit(value, series)" in dashboard_html
+
+
+def test_dashboard_axes_use_verbatim_measure_slash_unit_labels() -> None:
+    """Ticket-10 rule: each measure gets a dedicated axis titled '<measure> / <unit>'."""
+    summary = build_site_analysis_summary(
+        sensor_readings=[
+            sensor_reading("2026-07-02T22:03:00", "Basement", 19.0, 70.0),
+            sensor_reading("2026-07-02T22:03:00", "Bedroom", 20.0, 60.0),
+            sensor_reading("2026-07-02T22:03:00", "Living room", 21.0, 58.0),
+        ],
+        events=[],
+        weather_hours=[weather_hour("2026-07-02T22:00:00", 17.0, 68.0)],
+        rain_readings=[RainReading(datetime.fromisoformat("2026-07-02T22:10:00"), 0.4)],
+        generated_at=datetime.fromisoformat("2026-07-05T12:00:00"),
+    )
+
+    dashboard_html = render_index_html(summary)
+
+    def axis_labels(title: str) -> list[tuple[str, str, bool]]:
+        payload = chart_payload(dashboard_html, title)
+        return [
+            (str(axis["label"]), str(axis["side"]), bool(axis["show"]))
+            for axis in cast(list[dict[str, object]], payload["axes"])
+        ]
+
+    assert axis_labels("Basement conditions") == [
+        ("Relative humidity / %", "left", True),
+        ("Temperature / °C", "right", True),
+    ]
+    assert axis_labels("Absolute humidity") == [
+        ("Absolute humidity / g/m³", "left", True),
+        ("", "right", False),
+    ]
+    assert axis_labels("Temperature") == [("Temperature / °C", "left", True)]
+    assert axis_labels("Relative humidity") == [("Relative humidity / %", "left", True)]
+
+    basement_conditions_series = cast(
+        list[dict[str, object]],
+        chart_payload(dashboard_html, "Basement conditions")["series"],
+    )
+    units_by_name = {
+        str(series["name"]): str(series["unit"]) for series in basement_conditions_series
+    }
+    assert units_by_name == {
+        "Relative humidity": "%",
+        "Temperature": "°C",
+    }
+    assert "EA rain mm/hr" not in dashboard_html
+    # Hover values keep the accepted unit glyphs and spacing rules.
+    assert 'series.unit === "%" ? formattedValue + "%"' in dashboard_html
 
 
 def test_sensor_chart_payload_uses_tiered_resolution_and_min_max_bands() -> None:
@@ -178,8 +296,8 @@ def test_sensor_chart_payload_uses_tiered_resolution_and_min_max_bands() -> None
         generated_at=datetime.fromisoformat("2026-07-05T12:00:00"),
     )
 
-    raw_sensor_chart = summary.dashboard_charts[2]
-    basement_series = raw_sensor_chart.series[0]
+    relative_humidity_chart = summary.dashboard_charts[3]
+    basement_series = relative_humidity_chart.series[0]
 
     assert [timestamp for timestamp, _value in basement_series.points] == [
         datetime.fromisoformat("2026-05-01T05:00:00"),
@@ -191,7 +309,7 @@ def test_sensor_chart_payload_uses_tiered_resolution_and_min_max_bands() -> None
     assert [value for _timestamp, value in basement_series.max_points] == [82.0, 74.0, 76.0]
 
     dashboard_html = render_index_html(summary)
-    raw_payload = chart_payload(dashboard_html, "Raw Sensor Context")
+    raw_payload = chart_payload(dashboard_html, "Relative humidity")
 
     assert raw_payload["bands"]
 
@@ -214,9 +332,9 @@ def test_line_chart_runtime_spans_mixed_cadence_alignment_gaps() -> None:
     )
 
     dashboard_html = render_index_html(summary)
-    moisture_payload = chart_payload(dashboard_html, "Basement Versus Outdoor Moisture")
+    moisture_payload = chart_payload(dashboard_html, "Absolute humidity")
     moisture_data = cast(list[list[float | None]], moisture_payload["data"])
-    outdoor_values = moisture_data[2]
+    outdoor_values = moisture_data[4]
     first_weather_value = weather_hour(
         "2026-07-02T22:00:00",
         17.0,
@@ -228,7 +346,13 @@ def test_line_chart_runtime_spans_mixed_cadence_alignment_gaps() -> None:
         69.0,
     ).absolute_humidity_g_m3
 
-    assert outdoor_values == [first_weather_value, None, second_weather_value]
+    assert first_weather_value is not None
+    assert second_weather_value is not None
+    assert outdoor_values == [
+        round(first_weather_value, 3),
+        None,
+        round(second_weather_value, 3),
+    ]
     assert "normalizeLineGaps(payload);" in dashboard_html
 
 
@@ -254,15 +378,55 @@ def test_dashboard_and_report_render_from_shared_summary() -> None:
     report_html = render_physics_report_html(summary)
     rendered_html = f"{dashboard_html}\n{report_html}"
 
-    assert 'href="physics-report.html"' in dashboard_html
-    assert "<title>Basement Dampness</title>" in dashboard_html
-    assert "<h1>Basement dampness</h1>" in dashboard_html
-    assert "Latest basement sample" in dashboard_html
-    assert dashboard_html.index("Latest basement sample") < dashboard_html.index(
-        "Hypothesis Evidence"
-    )
-    assert "Basement Versus Outdoor Moisture" in dashboard_html
-    assert "Compatible with active basement drying" in dashboard_html
+    assert 'href="physics-report.html"' not in dashboard_html
+    assert "<title>Watch a basement dry</title>" in dashboard_html
+    assert "<h1>Watch a basement dry</h1>" in dashboard_html
+    assert '<body class="theme-aero">' in dashboard_html
+    assert "position: relative;" in dashboard_html
+    assert ".aero-deep {" in dashboard_html
+    assert "overflow: hidden;" in dashboard_html
+    assert "aero-aurora" in dashboard_html
+    assert "aero-bokeh" in dashboard_html
+    assert "Basement relative humidity" in dashboard_html
+    assert "Basement temperature" in dashboard_html
+    for chart_title in (
+        "Basement conditions",
+        "Absolute humidity",
+        "Temperature",
+        "Relative humidity",
+    ):
+        assert chart_title in dashboard_html
+    for old_chart_title in (
+        "Daily Basement Trends",
+        "Basement Versus Outdoor Moisture",
+        "Raw Sensor Context",
+    ):
+        assert old_chart_title not in dashboard_html
+    for removed_dashboard_section in (
+        "Latest basement sample",
+        "Hypothesis Evidence",
+        "Event-Bounded Period Metrics",
+        "Compatible with active basement drying",
+    ):
+        assert removed_dashboard_section not in dashboard_html
+    for asset_path in (
+        "assets/frutiger-aero/tall-scene-960.webp",
+        "assets/frutiger-aero/tall-scene-1440.webp",
+        "assets/frutiger-aero/tall-scene-2048.webp",
+        "assets/frutiger-aero/floor-strip.webp",
+        "assets/frutiger-aero/dehumidifier.webp",
+        "assets/frutiger-aero/goldfish.webp",
+        "assets/frutiger-aero/dragonfly.webp",
+    ):
+        assert asset_path in dashboard_html
+    for chart_hook in (
+        "drawEventBubbles(plot",
+        "rainBarPlugin(payload)",
+        "waterFill(themedSeriesColor(series))",
+        'body.classList.contains("theme-aero")',
+    ):
+        assert chart_hook in dashboard_html
+    assert "Data to 02 Jul 2026, 23:00" in dashboard_html
     assert "Prototype scope" not in dashboard_html
     assert 'href="index.html"' in report_html
     assert "Uncertainty Budget" in report_html
@@ -298,7 +462,31 @@ def test_dashboard_renders_self_contained_uplot_charts() -> None:
     assert not re.search(r"""<(script|link|img)\b[^>]+(?:src|href)=["']https?://""", dashboard_html)
 
 
-def test_render_site_pages_returns_relative_path_to_html_mapping() -> None:
+def test_charts_include_touch_interactions_without_trapping_page_scroll() -> None:
+    summary = build_site_analysis_summary(
+        sensor_readings=[
+            sensor_reading("2026-06-28T15:00:00", "Basement", 18.0, 88.0),
+            sensor_reading("2026-07-02T22:00:00", "Basement", 19.0, 72.0),
+        ],
+        events=[Event(datetime.fromisoformat("2026-06-28T16:20:00"), "Bare floor exposed")],
+        weather_hours=[weather_hour("2026-07-02T22:00:00", 17.0, 68.0)],
+        rain_readings=[RainReading(datetime.fromisoformat("2026-07-02T22:10:00"), 0.4)],
+        generated_at=datetime.fromisoformat("2026-07-05T12:00:00"),
+    )
+
+    for rendered_html in (render_index_html(summary), render_physics_report_html(summary)):
+        assert "addTouchNavigation(frame, plot, bounds);" in rendered_html
+        assert 'addEventListener("touchstart"' in rendered_html
+        assert 'addEventListener("touchmove"' in rendered_html
+        assert 'addEventListener("touchend"' in rendered_html
+        assert "touch-action: pan-y;" in rendered_html
+        # One-finger vertical movement stays with the browser so the page can scroll.
+        assert 'gesture = deltaX > deltaY ? "scrub" : "scroll";' in rendered_html
+        assert "addWheelNavigation(frame, plot, bounds);" in rendered_html
+        assert "drag: { x: true, y: false, setScale: true }" in rendered_html
+
+
+def test_render_site_pages_returns_public_relative_path_to_html_mapping() -> None:
     summary = build_site_analysis_summary(
         sensor_readings=[
             sensor_reading("2026-06-28T15:00:00", "Basement", 18.0, 88.0),
@@ -312,8 +500,25 @@ def test_render_site_pages_returns_relative_path_to_html_mapping() -> None:
 
     pages = render_site_pages(summary)
 
-    assert set(pages) == {"index.html", "physics-report.html"}
+    assert set(pages) == {"index.html"}
     assert pages["index.html"] == render_index_html(summary)
+
+
+def test_render_private_report_pages_keeps_local_report_available() -> None:
+    summary = build_site_analysis_summary(
+        sensor_readings=[
+            sensor_reading("2026-06-28T15:00:00", "Basement", 18.0, 88.0),
+            sensor_reading("2026-07-02T22:00:00", "Basement", 19.0, 72.0),
+        ],
+        events=[Event(datetime.fromisoformat("2026-06-28T16:20:00"), "Bare floor exposed")],
+        weather_hours=[weather_hour("2026-07-02T22:00:00", 17.0, 68.0)],
+        rain_readings=[RainReading(datetime.fromisoformat("2026-07-02T22:10:00"), 0.4)],
+        generated_at=datetime.fromisoformat("2026-07-05T12:00:00"),
+    )
+
+    pages = render_private_report_pages(summary)
+
+    assert set(pages) == {"physics-report.html"}
     assert pages["physics-report.html"] == render_physics_report_html(summary)
 
 
@@ -326,3 +531,68 @@ def test_write_site_pages_persists_mapping_under_output_dir(tmp_path: Path) -> N
     assert written_paths["nested/report.html"] == tmp_path / "site" / "nested" / "report.html"
     for relative_path, content in pages.items():
         assert written_paths[relative_path].read_text(encoding="utf-8") == content
+
+
+def test_render_site_assets_derives_production_frutiger_aero_manifest() -> None:
+    assets = render_site_assets()
+    expected_paths = {
+        "assets/frutiger-aero/dehumidifier.webp",
+        "assets/frutiger-aero/dragonfly.webp",
+        "assets/frutiger-aero/floor-strip.webp",
+        "assets/frutiger-aero/goldfish.webp",
+        "assets/frutiger-aero/manifest.json",
+        "assets/frutiger-aero/tall-scene-960.webp",
+        "assets/frutiger-aero/tall-scene-1440.webp",
+        "assets/frutiger-aero/tall-scene-2048.webp",
+    }
+
+    assert set(assets) == expected_paths
+    assert all(
+        asset.cache_control == "public, max-age=600, no-transform" for asset in assets.values()
+    )
+    assert all(asset.content for asset in assets.values())
+
+    manifest = cast(
+        dict[str, object],
+        json.loads(assets["assets/frutiger-aero/manifest.json"].content.decode("utf-8")),
+    )
+    entries = cast(list[dict[str, object]], manifest["assets"])
+    entries_by_path = {str(entry["path"]): entry for entry in entries}
+
+    assert set(entries_by_path) == expected_paths - {"assets/frutiger-aero/manifest.json"}
+    assert entries_by_path["assets/frutiger-aero/tall-scene-2048.webp"]["source"] == (
+        "tall-scene-source.webp"
+    )
+    assert entries_by_path["assets/frutiger-aero/tall-scene-2048.webp"]["width"] == 2048
+    assert entries_by_path["assets/frutiger-aero/tall-scene-1440.webp"]["width"] == 1440
+    assert entries_by_path["assets/frutiger-aero/tall-scene-960.webp"]["width"] == 960
+    assert entries_by_path["assets/frutiger-aero/dehumidifier.webp"]["source"] == (
+        "dehumidifier-no-shadow.png"
+    )
+    assert "tall-scene.png" not in json.dumps(manifest)
+    assert "dehumidifier.png" not in json.dumps(manifest)
+    assert "sky" not in json.dumps(manifest)
+    assert "waterline" not in json.dumps(manifest)
+    assert "grass" not in json.dumps(manifest)
+
+    source_dir = Path("src/basement_analysis/site_assets/frutiger_aero/source")
+    assert (source_dir / "tall-scene-source.webp").read_bytes() == Path(
+        "prototypes/site-redesign-mockups/assets/upscalemedia-tall-scene.webp"
+    ).read_bytes()
+    assert (source_dir / "dehumidifier-no-shadow.png").exists()
+    assert not (source_dir / "dehumidifier.png").exists()
+
+
+def test_write_site_assets_persists_generated_binary_assets(tmp_path: Path) -> None:
+    assets = render_site_assets()
+    selected_paths = (
+        "assets/frutiger-aero/goldfish.webp",
+        "assets/frutiger-aero/manifest.json",
+    )
+    selected_assets = {relative_path: assets[relative_path] for relative_path in selected_paths}
+
+    written_paths = write_site_assets(selected_assets, tmp_path / "site")
+
+    for relative_path in selected_paths:
+        assert written_paths[relative_path] == tmp_path / "site" / relative_path
+        assert written_paths[relative_path].read_bytes() == assets[relative_path].content

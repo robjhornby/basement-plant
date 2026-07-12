@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import csv
 import html
+import io
 import json
 import math
 import re
+from collections import deque
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -14,6 +16,8 @@ from typing import cast
 from urllib.parse import urlencode
 from urllib.request import urlopen
 from zoneinfo import ZoneInfo
+
+from PIL import Image
 
 from basement_analysis.curated_dataset import (
     CuratedDataRoot,
@@ -42,6 +46,34 @@ CAVERSHAM_LONGITUDE = -0.97
 LOCAL_TIMEZONE = "Europe/London"
 LATEST_CHART_WINDOW_SECONDS = 7 * 24 * 60 * 60
 VENDORED_UPLOT_DIR = Path(__file__).parent / "vendor" / "uplot"
+FRUTIGER_AERO_SOURCE_DIR = Path(__file__).parent / "site_assets" / "frutiger_aero" / "source"
+FRUTIGER_AERO_ASSET_PREFIX = "assets/frutiger-aero"
+FRUTIGER_AERO_CACHE_CONTROL = "public, max-age=600, no-transform"
+FRUTIGER_AERO_SCENE_WIDTHS = (960, 1440, 2048)
+FLOOR_CROP_TOP = 500
+FLOOR_WRAP_OVERLAP = 128
+DEHUMIDIFIER_MAX_WIDTH = 640
+AERO_CUTOUT_MAX_WIDTHS = {"goldfish.png": 640, "dragonfly.png": 512}
+# Aero palette roles keyed by (chart title, series name): the prototype's single-measure
+# room charts colour the basement series with the shared basement blue (`basementRh`), not
+# the hero chart's temperature orange, so one series name can need different roles per chart.
+AERO_CHART_SERIES_ROLES = {
+    ("Basement conditions", "Relative humidity"): "basementRh",
+    ("Basement conditions", "Temperature"): "basementTemp",
+    ("Absolute humidity", "Basement"): "basementAh",
+    ("Absolute humidity", "Bedroom"): "bedroom",
+    ("Absolute humidity", "Living room"): "livingRoom",
+    ("Absolute humidity", "Outdoor"): "outdoorAh",
+    ("Absolute humidity", "Rainfall"): "rain",
+    ("Temperature", "Basement"): "basementRh",
+    ("Temperature", "Bedroom"): "bedroom",
+    ("Temperature", "Living room"): "livingRoom",
+    ("Temperature", "Outdoor"): "outdoor",
+    ("Relative humidity", "Basement"): "basementRh",
+    ("Relative humidity", "Bedroom"): "bedroom",
+    ("Relative humidity", "Living room"): "livingRoom",
+    ("Relative humidity", "Outdoor"): "outdoor",
+}
 
 type JsonValue = None | bool | int | float | str | list[JsonValue] | dict[str, JsonValue]
 
@@ -60,12 +92,23 @@ SENSOR_FILENAME_LABEL_PATTERNS = (
 @dataclass(frozen=True)
 class BuildResult:
     index_path: Path
-    report_path: Path
+    private_report_path: Path | None
     curated_dataset_dir: CuratedDataRoot
     sensor_row_count: int
     weather_hour_count: int
     rain_reading_count: int
     newest_sensor_reading: datetime
+
+
+@dataclass(frozen=True)
+class RenderedSiteAsset:
+    relative_path: str
+    content: bytes
+    content_type: str
+    cache_control: str
+    source_name: str
+    width: int | None = None
+    height: int | None = None
 
 
 def parse_local_datetime(raw_value: str) -> datetime:
@@ -85,6 +128,10 @@ def format_optional_float(value: float | None, digits: int = 2) -> str:
 def slugify_identifier(value: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
     return slug or "chart"
+
+
+def aero_chart_series_role(chart_title: str, series_name: str) -> str:
+    return AERO_CHART_SERIES_ROLES.get((chart_title, series_name), slugify_identifier(series_name))
 
 
 @lru_cache(maxsize=1)
@@ -109,14 +156,20 @@ def render_json_script(script_id: str, payload: Mapping[str, JsonValue]) -> str:
     )
 
 
-def chart_timestamp_seconds(timestamp: datetime) -> float:
+def chart_timestamp_seconds(timestamp: datetime) -> int:
     local_zone = ZoneInfo(LOCAL_TIMEZONE)
     aware_timestamp = (
         timestamp.replace(tzinfo=local_zone)
         if timestamp.tzinfo is None
         else timestamp.astimezone(local_zone)
     )
-    return aware_timestamp.timestamp()
+    return round(aware_timestamp.timestamp())
+
+
+def chart_value(value: float | None) -> float | None:
+    # Chart tooltips show 2 decimals; 3 keeps a guard digit while avoiding
+    # full float64 repr precision, which dominates inline payload weight.
+    return None if value is None else round(value, 3)
 
 
 def load_sensor_readings(data_dir: Path) -> list[SensorReading]:
@@ -489,13 +542,18 @@ def render_uplot_time_series_chart(chart: ChartSpec, fallback_html: str) -> str:
     bands_payload: list[JsonValue] = []
     for chart_series in chart.series:
         values_by_timestamp = dict(chart_series.points)
-        data.append([values_by_timestamp.get(timestamp) for timestamp in all_timestamps])
+        data.append(
+            [chart_value(values_by_timestamp.get(timestamp)) for timestamp in all_timestamps]
+        )
         series_payload.append(
             {
                 "name": chart_series.name,
+                "role": aero_chart_series_role(chart.title, chart_series.name),
                 "color": chart_series.color,
-                "kind": "line",
-                "digits": 2,
+                "kind": chart_series.kind,
+                "unit": chart_series.unit,
+                "scale": chart_series.scale,
+                "digits": 2 if chart_series.kind == "bar" else 1,
             }
         )
         if chart_series.min_points and chart_series.max_points:
@@ -504,12 +562,16 @@ def render_uplot_time_series_chart(chart: ChartSpec, fallback_html: str) -> str:
             bands_payload.append(
                 {
                     "name": chart_series.name,
+                    "role": aero_chart_series_role(chart.title, chart_series.name),
                     "color": chart_series.color,
+                    "scale": chart_series.scale,
                     "lower": [
-                        min_values_by_timestamp.get(timestamp) for timestamp in all_timestamps
+                        chart_value(min_values_by_timestamp.get(timestamp))
+                        for timestamp in all_timestamps
                     ],
                     "upper": [
-                        max_values_by_timestamp.get(timestamp) for timestamp in all_timestamps
+                        chart_value(max_values_by_timestamp.get(timestamp))
+                        for timestamp in all_timestamps
                     ],
                 }
             )
@@ -522,10 +584,28 @@ def render_uplot_time_series_chart(chart: ChartSpec, fallback_html: str) -> str:
         for event in chart.event_markers
     ]
     chart_id = f"chart-{slugify_identifier(chart.title)}"
+    covered_scales = {axis.scale for axis in chart.axes}
     payload: dict[str, JsonValue] = {
         "id": chart_id,
         "title": chart.title,
-        "yLabel": chart.y_label,
+        "axes": [
+            *[
+                {
+                    "scale": axis.scale,
+                    "label": axis.label,
+                    "side": axis.side,
+                    "show": axis.show,
+                    "size": 56 if axis.show else 0,
+                }
+                for axis in chart.axes
+            ],
+            *[
+                {"scale": scale, "label": "", "side": "right", "show": False, "size": 0}
+                for scale in sorted(
+                    {series.scale for series in chart.series if series.scale not in covered_scales}
+                )
+            ],
+        ],
         "height": chart.height,
         "data": data,
         "series": series_payload,
@@ -545,19 +625,24 @@ def render_uplot_rain_chart(rain_chart: RainChartSpec, fallback_html: str) -> st
     payload: dict[str, JsonValue] = {
         "id": chart_id,
         "title": rain_chart.title,
-        "yLabel": rain_chart.y_label,
         "height": rain_chart.height,
         "data": [
             [chart_timestamp_seconds(timestamp) for timestamp, _value in points],
-            [value for _timestamp, value in points],
+            [chart_value(value) for _timestamp, value in points],
         ],
         "series": [
             {
-                "name": "EA rainfall",
+                "name": "Rainfall",
+                "role": "rain",
                 "color": "#2563eb",
                 "kind": "bar",
+                "unit": "mm per hour",
+                "scale": "y",
                 "digits": 2,
             }
+        ],
+        "axes": [
+            {"scale": "y", "label": rain_chart.y_label, "side": "left", "show": True, "size": 56}
         ],
         "bands": [],
         "events": [],
@@ -606,6 +691,12 @@ def render_chart_styles() -> str:
     .interactive-chart .u-over,
     .interactive-chart .u-under {{
       border-radius: 8px;
+    }}
+    .interactive-chart .u-over {{
+      touch-action: pan-y;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
     }}
     .interactive-chart .u-title {{
       display: none;
@@ -668,8 +759,44 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
 (function () {
   "use strict";
 
-  var latestWindowLabel = "1w";
+  var latestWindowLabel = "Week";
   var fullWindowLabel = "All";
+  var aeroChartTheme = {
+    roles: {
+      basementRh: "#0b76c2",
+      basementTemp: "#d96608",
+      basementAh: "#0e9c60",
+      outdoorAh: "#8a63e8",
+      rain: "#1e46c9",
+      bedroom: "#c93f8f",
+      livingRoom: "#b07a00",
+      outdoor: "#437fff"
+    },
+    inkMuted: "#4a7391",
+    grid: "rgba(15, 127, 206, 0.14)",
+    event: "rgba(15, 110, 175, 0.55)",
+    bandAlpha: 0.14,
+    axisFont: "12px 'Segoe UI', 'Helvetica Neue', sans-serif",
+    axisLabelFont: "12px 'Segoe UI', 'Helvetica Neue', sans-serif"
+  };
+
+  function isAeroTheme() {
+    return document.body.classList.contains("theme-aero");
+  }
+
+  function themedSeriesColor(series) {
+    if (isAeroTheme() && series.role && aeroChartTheme.roles[series.role]) {
+      return aeroChartTheme.roles[series.role];
+    }
+    return series.color;
+  }
+
+  function themedBandColor(band) {
+    if (isAeroTheme() && band.role && aeroChartTheme.roles[band.role]) {
+      return aeroChartTheme.roles[band.role];
+    }
+    return band.color;
+  }
 
   function formatTimestamp(epochSeconds) {
     if (epochSeconds == null) {
@@ -683,8 +810,15 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
     });
   }
 
-  function formatSeriesValue(value, digits) {
-    return value == null || !Number.isFinite(value) ? "n/a" : value.toFixed(digits);
+  function formatSeriesValueWithUnit(value, series) {
+    if (value == null || !Number.isFinite(value)) {
+      return "\u2013";
+    }
+    var formattedValue = value.toFixed(series.digits);
+    if (!series.unit) {
+      return formattedValue;
+    }
+    return series.unit === "%" ? formattedValue + "%" : formattedValue + " " + series.unit;
   }
 
   function normalizeLineGaps(payload) {
@@ -706,6 +840,23 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
     });
   }
 
+  function drawEventBubbles(plot, xPosition) {
+    var context = plot.ctx;
+    var bottom = plot.bbox.top + plot.bbox.height;
+    var count = 0;
+    for (var yPosition = bottom - 9; yPosition > plot.bbox.top + 8; yPosition -= 26) {
+      var radius = count % 2 === 0 ? 2.4 : 3.4;
+      var offset = count % 2 === 0 ? -2.5 : 2.5;
+      context.beginPath();
+      context.arc(xPosition + offset, yPosition, radius, 0, Math.PI * 2);
+      context.globalAlpha = 0.3;
+      context.fill();
+      context.globalAlpha = 1;
+      context.stroke();
+      count += 1;
+    }
+  }
+
   function eventMarkerPlugin(events) {
     return {
       hooks: {
@@ -718,12 +869,22 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
             var top = plot.bbox.top;
             var bottom = plot.bbox.top + plot.bbox.height;
             context.save();
-            context.strokeStyle = "rgba(55, 65, 81, 0.45)";
+            context.beginPath();
+            context.rect(plot.bbox.left, plot.bbox.top, plot.bbox.width, plot.bbox.height);
+            context.clip();
+            context.strokeStyle = isAeroTheme() ? aeroChartTheme.event : "rgba(55, 65, 81, 0.45)";
+            context.fillStyle = context.strokeStyle;
             context.lineWidth = 1;
-            context.setLineDash([4, 4]);
+            if (!isAeroTheme()) {
+              context.setLineDash([4, 4]);
+            }
             events.forEach(function (event) {
               var xPosition = plot.valToPos(event.timestamp, "x", true);
               if (xPosition >= plot.bbox.left && xPosition <= plot.bbox.left + plot.bbox.width) {
+                if (isAeroTheme()) {
+                  drawEventBubbles(plot, Math.round(xPosition) + 0.5);
+                  return;
+                }
                 context.beginPath();
                 context.moveTo(Math.round(xPosition) + 0.5, top);
                 context.lineTo(Math.round(xPosition) + 0.5, bottom);
@@ -766,7 +927,10 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
             bands.forEach(function (band) {
               var lowerSegment = [];
               var isDrawing = false;
-              context.fillStyle = hexToRgba(band.color, 0.14);
+              context.fillStyle = hexToRgba(
+                themedBandColor(band),
+                isAeroTheme() ? aeroChartTheme.bandAlpha : 0.14
+              );
 
               function finishSegment() {
                 if (!isDrawing || lowerSegment.length < 2) {
@@ -803,8 +967,8 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
                   finishSegment();
                   return;
                 }
-                var upperY = plot.valToPos(upper, "y", true);
-                var lowerY = plot.valToPos(lower, "y", true);
+                var upperY = plot.valToPos(upper, band.scale || "y", true);
+                var lowerY = plot.valToPos(lower, band.scale || "y", true);
                 if (!isDrawing) {
                   context.beginPath();
                   context.moveTo(xPosition, upperY);
@@ -823,6 +987,77 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
     };
   }
 
+  function rainBarPlugin(payload) {
+    if (!isAeroTheme()) {
+      return { hooks: {} };
+    }
+    var barIndex = -1;
+    payload.series.forEach(function (series, index) {
+      if (series.kind === "bar") {
+        barIndex = index;
+      }
+    });
+    if (barIndex === -1) {
+      return { hooks: {} };
+    }
+    var series = payload.series[barIndex];
+    return {
+      hooks: {
+        draw: [
+          function (plot) {
+            var context = plot.ctx;
+            var values = payload.data[barIndex + 1];
+            var timestamps = payload.data[0];
+            var zeroY = plot.valToPos(0, series.scale, true);
+            context.save();
+            context.beginPath();
+            context.rect(plot.bbox.left, plot.bbox.top, plot.bbox.width, plot.bbox.height);
+            context.clip();
+            context.globalCompositeOperation = "destination-over";
+            context.fillStyle = hexToRgba(themedSeriesColor(series), 0.9);
+            timestamps.forEach(function (timestamp, index) {
+              var value = values[index];
+              if (value == null || !Number.isFinite(value) || value <= 0) {
+                return;
+              }
+              var xLeft = plot.valToPos(timestamp - 1700, "x", true);
+              var xRight = plot.valToPos(timestamp + 1700, "x", true);
+              if (xRight < plot.bbox.left - 40 || xLeft > plot.bbox.left + plot.bbox.width + 40) {
+                return;
+              }
+              var yPosition = plot.valToPos(value, series.scale, true);
+              var width = Math.max(1, xRight - xLeft - 1);
+              var height = Math.max(1, zeroY - yPosition);
+              if (typeof context.roundRect === "function" && width >= 2 && height >= 2) {
+                var radius = Math.min(width / 2, 3.5, height);
+                context.beginPath();
+                context.roundRect(xLeft, yPosition, width, height, [radius, radius, 0, 0]);
+                context.fill();
+                return;
+              }
+              context.fillRect(xLeft, yPosition, width, height);
+            });
+            context.restore();
+          }
+        ]
+      }
+    };
+  }
+
+  function waterFill(color) {
+    return function (plot) {
+      var top = plot.bbox.top;
+      var height = plot.bbox.height;
+      if (!Number.isFinite(top) || !Number.isFinite(height) || height <= 0) {
+        return hexToRgba(color, 0.18);
+      }
+      var gradient = plot.ctx.createLinearGradient(0, top, 0, top + height);
+      gradient.addColorStop(0, hexToRgba(color, 0.4));
+      gradient.addColorStop(1, hexToRgba(color, 0.03));
+      return gradient;
+    };
+  }
+
   function makeSeriesOptions(payload) {
     return [
       {
@@ -834,16 +1069,27 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
     ].concat(payload.series.map(function (series) {
       var options = {
         label: series.name,
-        stroke: series.color,
-        fill: series.kind === "bar" ? series.color : undefined,
+        stroke: themedSeriesColor(series),
+        fill: series.kind === "bar" ? themedSeriesColor(series) : undefined,
         width: series.kind === "bar" ? 0 : 2,
+        scale: series.scale || "y",
         points: { show: false },
         value: function (_plot, value) {
-          return formatSeriesValue(value, series.digits);
+          return formatSeriesValueWithUnit(value, series);
         }
       };
       if (series.kind === "bar") {
-        options.paths = uPlot.paths.bars({ size: [0.74, Infinity, 1] });
+        options.paths = isAeroTheme()
+          ? function () { return null; }
+          : uPlot.paths.bars({ size: [0.74, Infinity, 1] });
+      }
+      if (
+        isAeroTheme() &&
+        payload.title === "Basement conditions" &&
+        series.role === "basementRh"
+      ) {
+        options.fill = waterFill(themedSeriesColor(series));
+        options.width = 2.5;
       }
       return options;
     }));
@@ -860,13 +1106,17 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
     };
   }
 
-  function valueBounds(payload) {
+  function scaleValueBounds(payload, scaleKey) {
     var values = [];
-    payload.data.slice(1).forEach(function (seriesValues) {
-      values = values.concat(seriesValues);
+    payload.series.forEach(function (series, seriesIndex) {
+      if ((series.scale || "y") === scaleKey) {
+        values = values.concat(payload.data[seriesIndex + 1]);
+      }
     });
     (payload.bands || []).forEach(function (band) {
-      values = values.concat(band.lower, band.upper);
+      if ((band.scale || "y") === scaleKey) {
+        values = values.concat(band.lower, band.upper);
+      }
     });
     var finiteValues = values.filter(function (value) {
       return value != null && Number.isFinite(value);
@@ -874,13 +1124,99 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
     if (finiteValues.length === 0) {
       return { minimum: 0, maximum: 1 };
     }
-    var minimum = Math.min.apply(null, finiteValues);
-    var maximum = Math.max.apply(null, finiteValues);
-    if (minimum === maximum) {
-      return { minimum: minimum - 1, maximum: maximum + 1 };
-    }
-    var padding = (maximum - minimum) * 0.08;
-    return { minimum: minimum - padding, maximum: maximum + padding };
+    return {
+      minimum: Math.min.apply(null, finiteValues),
+      maximum: Math.max.apply(null, finiteValues)
+    };
+  }
+
+  function scaleHasBars(payload, scaleKey) {
+    return payload.series.some(function (series) {
+      return (series.scale || "y") === scaleKey && series.kind === "bar";
+    });
+  }
+
+  function makeScales(payload, bounds) {
+    var scales = {
+      x: { time: true, min: bounds.latestMinimum, max: bounds.maximum }
+    };
+    (payload.axes || [{ scale: "y" }]).forEach(function (axis) {
+      var scaleKey = axis.scale || "y";
+      var valueBounds = scaleValueBounds(payload, scaleKey);
+      if (scaleHasBars(payload, scaleKey)) {
+        // Bars keep a fixed full-history range so zooming in never inflates light rain.
+        var barMaximum = Math.max(1, valueBounds.maximum * 1.15);
+        scales[scaleKey] = { range: function () {
+          return [0, barMaximum];
+        } };
+        return;
+      }
+      var minimum = valueBounds.minimum;
+      var maximum = valueBounds.maximum;
+      if (minimum === maximum) {
+        minimum -= 1;
+        maximum += 1;
+      } else {
+        var padding = (maximum - minimum) * 0.08;
+        minimum -= padding;
+        maximum += padding;
+      }
+      scales[scaleKey] = { range: function () {
+        return [minimum, maximum];
+      } };
+    });
+    return scales;
+  }
+
+  function makeAxes(payload) {
+    var timeAxis = isAeroTheme() ? {
+      stroke: aeroChartTheme.inkMuted,
+      grid: { stroke: aeroChartTheme.grid, width: 1 },
+      ticks: { stroke: aeroChartTheme.grid, width: 1 },
+      font: aeroChartTheme.axisFont
+    } : {};
+    var shownCount = 0;
+    return [timeAxis].concat(payload.axes.map(
+      function (axis) {
+        var shown = axis.show !== false;
+        var firstShown = false;
+        if (shown) {
+          shownCount += 1;
+          firstShown = shownCount === 1;
+        }
+        // Keys are only set when they carry a value: uPlot copies an explicit
+        // undefined over its own axis defaults and later crashes resolving the font.
+        var axisOptions = {
+          scale: axis.scale || "y",
+          label: axis.label || "",
+          side: axis.side === "right" ? 1 : 3,
+          show: shown,
+          size: shown ? (axis.size || 56) : 0
+        };
+        if (!shown) {
+          axisOptions.values = function () { return []; };
+          axisOptions.ticks = { show: false };
+          axisOptions.grid = { show: false };
+          return axisOptions;
+        }
+        // Only the first visible value axis draws grid lines, matching the prototype;
+        // extra axes would double-stripe the plot.
+        if (!firstShown) {
+          axisOptions.grid = { show: false };
+        }
+        if (isAeroTheme()) {
+          axisOptions.ticks = { stroke: aeroChartTheme.grid, width: 1 };
+          if (firstShown) {
+            axisOptions.grid = { stroke: aeroChartTheme.grid, width: 1 };
+          }
+          axisOptions.stroke = aeroChartTheme.inkMuted;
+          axisOptions.font = aeroChartTheme.axisFont;
+          axisOptions.labelFont = aeroChartTheme.axisLabelFont;
+          axisOptions.labelGap = 4;
+        }
+        return axisOptions;
+      }
+    ));
   }
 
   function clampRange(minimum, maximum, bounds) {
@@ -906,8 +1242,16 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
   }
 
   function addRangeControls(frame, plot, bounds) {
-    var controls = document.createElement("div");
-    controls.className = "chart-actions";
+    // The aero chart cards carry a .chart-actions container in their header so the
+    // buttons share the title row (prototype layout); the private report has no card
+    // and keeps the buttons in a row of their own above the chart.
+    var card = frame.closest(".chart-card");
+    var controls = card ? card.querySelector(".chart-actions") : null;
+    if (controls == null) {
+      controls = document.createElement("div");
+      controls.className = "chart-actions";
+      frame.insertBefore(controls, frame.firstChild);
+    }
     var latestButton = document.createElement("button");
     var fullButton = document.createElement("button");
     latestButton.type = "button";
@@ -929,7 +1273,6 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
       fullButton.setAttribute("aria-pressed", "true");
     });
     controls.append(latestButton, fullButton);
-    frame.insertBefore(controls, frame.firstChild);
   }
 
   function addWheelNavigation(frame, plot, bounds) {
@@ -964,6 +1307,111 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
     }, { passive: false });
   }
 
+  function addTouchNavigation(frame, plot, bounds) {
+    var overlay = frame.querySelector(".u-over");
+    if (overlay == null) {
+      return;
+    }
+    var minimumSpanSeconds = 600;
+    var directionSlopPixels = 8;
+    var gesture = null;
+    var touchStart = null;
+    var pinchStartValues = null;
+
+    function overlayLeft(touch) {
+      return touch.clientX - overlay.getBoundingClientRect().left;
+    }
+
+    function scrubTo(touch) {
+      var rect = overlay.getBoundingClientRect();
+      plot.setCursor({
+        left: touch.clientX - rect.left,
+        top: touch.clientY - rect.top
+      });
+    }
+
+    function beginPinch(touches) {
+      gesture = "pinch";
+      pinchStartValues = [
+        plot.posToVal(overlayLeft(touches[0]), "x"),
+        plot.posToVal(overlayLeft(touches[1]), "x")
+      ];
+    }
+
+    function movePinch(touches) {
+      var firstX = overlayLeft(touches[0]);
+      var secondX = overlayLeft(touches[1]);
+      var width = overlay.getBoundingClientRect().width;
+      if (Math.abs(secondX - firstX) < 12 || width <= 0) {
+        return;
+      }
+      var span =
+        ((pinchStartValues[1] - pinchStartValues[0]) * width) / (secondX - firstX);
+      if (!Number.isFinite(span) || span <= 0) {
+        return;
+      }
+      span = Math.max(span, minimumSpanSeconds);
+      var minimum = pinchStartValues[0] - (firstX / width) * span;
+      setRange(plot, minimum, minimum + span, bounds);
+    }
+
+    overlay.addEventListener("touchstart", function (event) {
+      if (event.touches.length >= 2) {
+        event.preventDefault();
+        beginPinch(event.touches);
+        return;
+      }
+      gesture = null;
+      touchStart = { x: event.touches[0].clientX, y: event.touches[0].clientY };
+    }, { passive: false });
+
+    overlay.addEventListener("touchmove", function (event) {
+      if (gesture === "pinch") {
+        if (event.touches.length >= 2) {
+          event.preventDefault();
+          movePinch(event.touches);
+        }
+        return;
+      }
+      if (gesture === "scroll" || touchStart == null || event.touches.length !== 1) {
+        return;
+      }
+      var touch = event.touches[0];
+      if (gesture == null) {
+        var deltaX = Math.abs(touch.clientX - touchStart.x);
+        var deltaY = Math.abs(touch.clientY - touchStart.y);
+        if (Math.max(deltaX, deltaY) < directionSlopPixels) {
+          return;
+        }
+        gesture = deltaX > deltaY ? "scrub" : "scroll";
+      }
+      if (gesture === "scrub") {
+        event.preventDefault();
+        scrubTo(touch);
+      }
+    }, { passive: false });
+
+    function endTouch(event) {
+      if (gesture == null && touchStart != null && event.changedTouches.length > 0) {
+        scrubTo(event.changedTouches[0]);
+      }
+      if (event.touches.length === 0) {
+        gesture = null;
+        touchStart = null;
+        pinchStartValues = null;
+        return;
+      }
+      if (gesture === "pinch" && event.touches.length >= 2) {
+        beginPinch(event.touches);
+        return;
+      }
+      gesture = "scroll";
+    }
+
+    overlay.addEventListener("touchend", endTouch);
+    overlay.addEventListener("touchcancel", endTouch);
+  }
+
   function renderChart(frame) {
     var payloadScript = document.getElementById(frame.dataset.chartPayload);
     if (payloadScript == null) {
@@ -973,18 +1421,12 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
     normalizeLineGaps(payload);
     var host = frame.querySelector(".interactive-chart");
     var bounds = dataBounds(payload);
-    var yBounds = valueBounds(payload);
     var options = {
       title: payload.title,
       width: Math.max(320, host.clientWidth || frame.clientWidth || 720),
       height: payload.height,
-      scales: {
-        x: { time: true, min: bounds.latestMinimum, max: bounds.maximum }
-      },
-      axes: [
-        {},
-        { label: payload.yLabel, size: 58 }
-      ],
+      scales: makeScales(payload, bounds),
+      axes: makeAxes(payload),
       cursor: {
         drag: { x: true, y: false, setScale: true },
         focus: { prox: 24 }
@@ -993,21 +1435,15 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
       series: makeSeriesOptions(payload),
       plugins: [
         rangeBandPlugin(payload.bands || [], payload.data[0]),
+        rainBarPlugin(payload),
         eventMarkerPlugin(payload.events)
       ]
     };
-    if (payload.series.some(function (series) { return series.kind === "bar"; })) {
-      options.scales.y = { range: function (_plot, minimum, maximum) {
-        return [0, Math.max(1, maximum * 1.12)];
-      } };
-    } else {
-      options.scales.y = { range: function () {
-        return [yBounds.minimum, yBounds.maximum];
-      } };
-    }
     var plot = new uPlot(options, payload.data, host);
+    frame.chartPlot = plot;
     addRangeControls(frame, plot, bounds);
     addWheelNavigation(frame, plot, bounds);
+    addTouchNavigation(frame, plot, bounds);
     if ("ResizeObserver" in window) {
       new ResizeObserver(function () {
         plot.setSize({
@@ -1089,179 +1525,641 @@ def render_metric_card(label: str, value: str) -> str:
     )
 
 
-def render_index_html(summary: SiteAnalysisSummary) -> str:
-    cards_html = "\n".join(
-        render_metric_card(card.label, card.value) for card in summary.metric_cards
+def latest_basement_readout(summary: SiteAnalysisSummary, metric_name: str) -> str:
+    chart = summary.dashboard_charts[0]
+    matching_series = next(
+        series for series in chart.series if series.name.lower() == metric_name
     )
-    charts_by_title = {chart.title: chart for chart in summary.dashboard_charts}
-    daily_chart = render_chart_spec(charts_by_title["Daily Basement Trends"])
-    humidity_chart = render_chart_spec(charts_by_title["Basement Versus Outdoor Moisture"])
-    raw_sensor_chart = render_chart_spec(charts_by_title["Raw Sensor Context"])
-    generated_at = format_timestamp(summary.metadata.generated_at)
+    if not matching_series.points:
+        return "n/a"
+    return format_optional_float(matching_series.points[-1][1], 1)
+
+
+def render_aero_readouts(summary: SiteAnalysisSummary) -> str:
+    relative_humidity = latest_basement_readout(summary, "relative humidity")
+    temperature = latest_basement_readout(summary, "temperature")
+    humidity_fill = "50%" if relative_humidity == "n/a" else f"{relative_humidity}%"
+    return f"""
+    <section class="readouts" aria-label="Current basement conditions">
+      <div class="readout readout-humidity" style="--fill: {html.escape(humidity_fill)}">
+        <div class="readout-value">{html.escape(relative_humidity)}<span>%</span></div>
+        <div class="readout-label">Basement relative humidity</div>
+      </div>
+      <div class="readout readout-temperature">
+        <div class="readout-value">{html.escape(temperature)}<span>°C</span></div>
+        <div class="readout-label">Basement temperature</div>
+      </div>
+    </section>
+    """
+
+
+def render_aero_chart_card(chart: ChartSpec) -> str:
+    return f"""
+    <section class="chart-card">
+      <div class="chart-head">
+        <h2>{html.escape(chart.title)}</h2>
+        <div class="chart-actions"></div>
+      </div>
+      {render_chart_spec(chart)}
+    </section>
+    """
+
+
+def frutiger_aero_asset_path(filename: str) -> str:
+    return f"{FRUTIGER_AERO_ASSET_PREFIX}/{filename}"
+
+
+def render_aero_bubbles() -> str:
+    bubbles = (
+        ("18px", "8%", "13s", "-3s"),
+        ("34px", "23%", "17s", "-9s"),
+        ("12px", "44%", "11s", "-6s"),
+        ("26px", "62%", "15s", "-1s"),
+        ("42px", "78%", "19s", "-12s"),
+        ("16px", "91%", "12s", "-8s"),
+    )
+    return "\n".join(
+        (
+            '    <div class="aero-underbubble" '
+            f'style="width:{size};height:{size};left:{left};'
+            f'animation-duration:{duration};animation-delay:{delay}"></div>'
+        )
+        for size, left, duration, delay in bubbles
+    )
+
+
+def render_index_html(summary: SiteAnalysisSummary) -> str:
+    charts_html = "\n".join(render_aero_chart_card(chart) for chart in summary.dashboard_charts)
+    latest_reading = summary.metadata.data_window_end.strftime("%d %b %Y, %H:%M")
+    scene_960 = frutiger_aero_asset_path("tall-scene-960.webp")
+    scene_1440 = frutiger_aero_asset_path("tall-scene-1440.webp")
+    scene_2048 = frutiger_aero_asset_path("tall-scene-2048.webp")
+    floor_image = frutiger_aero_asset_path("floor-strip.webp")
+    dehumidifier_image = frutiger_aero_asset_path("dehumidifier.webp")
+    goldfish_image = frutiger_aero_asset_path("goldfish.webp")
+    dragonfly_image = frutiger_aero_asset_path("dragonfly.webp")
     return f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Basement Dampness</title>
+  <title>Watch a basement dry</title>
   <link rel="icon" href="data:,">
   <style>
     {render_chart_styles()}
     :root {{
       color-scheme: light;
-      --ink: #18212f;
-      --muted: #5d6878;
-      --line: #d8dee8;
-      --soft: #f4f7f9;
-      --accent: #1f766f;
+      --ink: #123a55;
+      --muted: #4a7391;
+      --line: rgba(109, 188, 224, 0.46);
+      --accent: #0f7fce;
+      --scene-image: url("{scene_1440}");
+      --floor-image: url("{floor_image}");
+      --dehumidifier-image: url("{dehumidifier_image}");
+      --goldfish-image: url("{goldfish_image}");
+      --dragonfly-image: url("{dragonfly_image}");
+      --waterline-y: 92vh;
+      --scene-height: 150vw;
+      --scene-waterline: 94.5vw;
+      --scene-top: calc(var(--waterline-y) - var(--scene-waterline));
+      --scene-bottom: calc(var(--waterline-y) + var(--scene-height) - var(--scene-waterline));
     }}
     * {{ box-sizing: border-box; }}
+    html {{ min-height: 100%; }}
     body {{
       margin: 0;
-      font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      min-height: 100%;
+      overflow-x: hidden;
+      position: relative;
+      font: 14px/1.45 "Segoe UI", "Helvetica Neue", -apple-system, BlinkMacSystemFont,
+        sans-serif;
       color: var(--ink);
-      background: #ffffff;
+      background: #073a58;
+    }}
+    .aero-scene-wrap {{
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: var(--scene-bottom);
+      overflow: hidden;
+      pointer-events: none;
+    }}
+    .aero-sky-extend {{
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(56vw 56vw at 15vw calc(var(--scene-top) + 21vw),
+          rgba(190, 235, 255, 0.6), rgba(190, 235, 255, 0) 70%),
+        linear-gradient(90deg, rgba(150, 215, 255, 0.35), rgba(150, 215, 255, 0) 40%,
+          rgba(2, 45, 140, 0.25)),
+        linear-gradient(180deg, #0143a0 0%, #0062d7 var(--scene-top), #0062d7 100%);
+    }}
+    .aero-scene {{
+      position: absolute;
+      top: var(--scene-top);
+      left: 0;
+      width: 100%;
+      height: var(--scene-height);
+      background: var(--scene-image) center / 100% 100% no-repeat;
+      mask-image: linear-gradient(180deg, transparent 0, #000 56px);
+    }}
+    .aero-scene-fade {{
+      position: absolute;
+      left: 0;
+      width: 100%;
+      height: 22vw;
+      top: calc(var(--scene-bottom) - 22vw);
+      background: linear-gradient(180deg, rgba(6, 65, 110, 0), #06416e 96%);
+    }}
+    .aero-deep {{
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      pointer-events: none;
+      background: linear-gradient(180deg,
+        rgba(6, 65, 110, 0) 0,
+        rgba(6, 65, 110, 0) var(--scene-bottom),
+        #06416e var(--scene-bottom),
+        #052c46 72%,
+        #04202f 100%);
+    }}
+    .page {{
+      position: relative;
+      z-index: 2;
+      max-width: 1060px;
+      margin: 0 auto;
+      padding: 0 20px 300px;
+    }}
+    .zone-art {{
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 50%;
+      width: 100vw;
+      transform: translateX(-50%);
+      z-index: -1;
+      overflow: hidden;
+      pointer-events: none;
+    }}
+    .zone-sky {{
+      position: relative;
+      min-height: 100vh;
+      padding-top: 0;
+    }}
+    .zone-under {{
+      position: relative;
+      padding-top: 4vh;
     }}
     header {{
-      border-bottom: 1px solid var(--line);
-      padding: 18px 22px 14px;
-    }}
-    main {{
-      max-width: 1180px;
-      padding: 18px 22px 36px;
+      text-align: center;
+      padding-top: 9vh;
     }}
     h1 {{
-      margin: 0 0 4px;
-      font-size: 24px;
-      letter-spacing: 0;
+      margin: 0;
+      font-size: clamp(38px, 5.4vw, 58px);
+      font-weight: 650;
+      letter-spacing: 0.005em;
+      background: linear-gradient(180deg, #04365f, #0a63a8 42%, #2ea3dc 72%, #8fdcf8);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      filter: drop-shadow(0 1px 0 rgba(255,255,255,0.95))
+        drop-shadow(0 2px 2px rgba(255,255,255,0.55))
+        drop-shadow(0 8px 22px rgba(8,70,125,0.4));
     }}
     h2 {{
-      margin: 28px 0 10px;
-      font-size: 18px;
+      margin: 0;
+      font-size: 17px;
+      font-weight: 600;
       letter-spacing: 0;
+      color: #0b5f9e;
     }}
-    h3 {{
-      margin: 0 0 7px;
-      font-size: 14px;
-      letter-spacing: 0;
-    }}
-    .subtle {{ color: var(--muted); }}
     a {{ color: var(--accent); }}
-    .cards {{
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(172px, 1fr));
-      gap: 10px;
-      margin: 0 0 18px;
+    .readouts {{
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 36px;
+      margin: 7vh 0 30px;
     }}
-    .card, .panel {{
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 11px 12px;
-      background: #fff;
+    .readout {{
+      position: relative;
+      flex: 0 0 236px;
+      width: 236px;
+      height: 236px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 0 26px;
+      border: 1px solid rgba(255,255,255,0.95);
+      border-radius: 50%;
+      text-align: center;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 14px 34px rgba(12,80,130,0.35),
+        0 0 26px rgba(140,220,255,0.4),
+        inset 0 2px 2px rgba(255,255,255,0.95),
+        inset 0 -14px 26px rgba(90,180,230,0.35),
+        0 40px 30px -22px rgba(25,140,205,0.45);
     }}
-    .label {{
-      color: var(--muted);
+    .readout-humidity {{
+      background: radial-gradient(circle at 32% 26%, rgba(255,255,255,0.9),
+        rgba(225,246,255,0.55) 32%, rgba(170,220,248,0.4) 62%,
+        rgba(125,195,238,0.55));
+    }}
+    .readout-humidity::before {{
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: var(--fill, 50%);
+      background: linear-gradient(180deg, rgba(110,210,252,0.6), rgba(25,132,202,0.72));
+      border-radius: 46% 54% 0 0 / 16px 20px 0 0;
+      box-shadow: inset 0 3px 3px -1px rgba(255,255,255,0.95);
+      animation: water-slosh 7s ease-in-out infinite alternate;
+    }}
+    .readout-temperature {{
+      background: radial-gradient(circle at 32% 26%, rgba(255,255,255,0.92),
+        rgba(255,238,205,0.6) 34%, rgba(252,195,115,0.5) 66%,
+        rgba(240,150,55,0.6));
+      box-shadow: 0 14px 34px rgba(140,85,15,0.3),
+        0 0 26px rgba(255,205,130,0.45),
+        inset 0 2px 2px rgba(255,255,255,0.95),
+        inset 0 -14px 26px rgba(235,155,60,0.4),
+        0 40px 30px -22px rgba(220,140,45,0.4);
+    }}
+    .readout::after {{
+      content: "";
+      position: absolute;
+      left: 19%;
+      right: 19%;
+      top: 7%;
+      height: 30%;
+      border-radius: 50%;
+      background: linear-gradient(180deg, rgba(255,255,255,0.95), rgba(255,255,255,0.05));
+    }}
+    .readout-value {{
+      position: relative;
+      z-index: 1;
+      font-size: 54px;
+      font-weight: 300;
+      line-height: 1;
+      color: #084a80;
+      text-shadow: 0 1px 0 rgba(255,255,255,0.85);
+      font-variant-numeric: tabular-nums;
+    }}
+    .readout-temperature .readout-value {{ color: #a34a02; }}
+    .readout-value span {{
+      margin-left: 4px;
+      font-size: 24px;
+      opacity: 0.75;
+    }}
+    .readout-label {{
+      position: relative;
+      z-index: 1;
+      margin-top: 8px;
+      font-size: 13px;
+      color: #275b7e;
+    }}
+    .readout-temperature .readout-label {{ color: #7c4a14; }}
+    @keyframes water-slosh {{
+      from {{ border-radius: 46% 54% 0 0 / 18px 12px 0 0; }}
+      to {{ border-radius: 54% 46% 0 0 / 12px 18px 0 0; }}
+    }}
+    .aero-scroll-hint {{
+      position: absolute;
+      left: 50%;
+      top: 74vh;
+      transform: translateX(-50%);
+    }}
+    .aero-scroll-hint span {{
+      display: block;
+      width: 26px;
+      height: 26px;
+      border-right: 6px solid rgba(255,255,255,0.95);
+      border-bottom: 6px solid rgba(255,255,255,0.95);
+      border-radius: 3px;
+      filter: drop-shadow(0 3px 10px rgba(8,70,125,0.6));
+      animation: hint-bob 1.8s ease-in-out infinite;
+    }}
+    @keyframes hint-bob {{
+      0%, 100% {{ transform: rotate(45deg) translate(0, 0); opacity: 0.8; }}
+      50% {{ transform: rotate(45deg) translate(7px, 7px); opacity: 1; }}
+    }}
+    .aero-aurora {{
+      position: absolute;
+      height: 240px;
+      width: 150%;
+      left: -25%;
+      background: linear-gradient(100deg, transparent 8%, rgba(130,255,225,0.28) 30%,
+        rgba(150,195,255,0.32) 52%, rgba(255,190,245,0.24) 72%, transparent 92%);
+      filter: blur(28px);
+      mix-blend-mode: screen;
+      animation: aurora-drift 16s ease-in-out infinite alternate;
+    }}
+    .aero-aurora.aurora-2 {{
+      animation-duration: 23s;
+      animation-delay: -8s;
+      opacity: 0.7;
+    }}
+    @keyframes aurora-drift {{
+      from {{ transform: rotate(-7deg) translateX(-50px); }}
+      to {{ transform: rotate(-4deg) translateX(50px); }}
+    }}
+    .aero-bokeh {{
+      position: absolute;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 30%, rgba(255,255,255,0.95),
+        rgba(255,255,255,0.25) 55%, transparent 72%);
+      filter: blur(1.5px);
+      opacity: 0.55;
+      animation: bokeh-drift ease-in-out infinite alternate;
+    }}
+    @keyframes bokeh-drift {{
+      from {{ transform: translate(0, 0); }}
+      to {{ transform: translate(26px, -34px); }}
+    }}
+    .aero-dragonfly {{
+      position: absolute;
+      top: 56vh;
+      right: 6%;
+      width: 148px;
+      aspect-ratio: 512 / 342;
+      background: var(--dragonfly-image) center / contain no-repeat;
+      transform: rotate(-8deg);
+      z-index: 2;
+      pointer-events: none;
+      filter: drop-shadow(0 8px 12px rgba(20,70,110,0.35));
+      animation: dragonfly-hover 3.2s ease-in-out infinite alternate;
+    }}
+    @keyframes dragonfly-hover {{
+      from {{ transform: rotate(-8deg) translateY(0); }}
+      to {{ transform: rotate(-6deg) translateY(6px); }}
+    }}
+    .aero-fish-sky,
+    .aero-fish-deep {{
+      position: absolute;
+      aspect-ratio: 640 / 480;
+      background: var(--goldfish-image) center / contain no-repeat;
+      pointer-events: none;
+    }}
+    .aero-fish-sky {{
+      width: clamp(110px, 14vw, 185px);
+      right: 5%;
+      top: 330px;
+      filter: drop-shadow(0 10px 16px rgba(10,70,120,0.35));
+      animation: fish-swim 11s ease-in-out infinite alternate;
+    }}
+    .aero-fish-deep {{
+      width: 110px;
+      top: calc(100vh + 34vw);
+      left: 8%;
+      filter: brightness(0.35) saturate(0.4) blur(1.5px);
+      opacity: 0.5;
+      transform: scaleX(-1);
+      animation: fish-deep-drift 70s ease-in-out infinite alternate;
+    }}
+    @keyframes fish-swim {{
+      from {{ transform: translate(0, 0) rotate(-5deg); }}
+      to {{ transform: translate(-70px, 26px) rotate(3deg); }}
+    }}
+    @keyframes fish-deep-drift {{
+      from {{ transform: scaleX(-1) translate(0, 0); }}
+      to {{ transform: scaleX(-1) translate(-58vw, 40px); }}
+    }}
+    .aero-underbubble {{
+      position: absolute;
+      bottom: -70px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 32% 28%, rgba(255,255,255,0.9),
+        rgba(255,255,255,0.28) 24%, rgba(190,235,255,0.12) 60%,
+        rgba(160,220,250,0.3));
+      border: 1px solid rgba(255,255,255,0.5);
+      box-shadow: inset -5px -7px 14px rgba(120,200,240,0.3);
+      animation: bubble-rise linear infinite;
+    }}
+    @keyframes bubble-rise {{
+      0% {{ transform: translate(0, 0); opacity: 0; }}
+      8% {{ opacity: 0.9; }}
+      100% {{ transform: translate(26px, -1600px); opacity: 0; }}
+    }}
+    .aero-deep-floor {{
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: min(240px, 30vw);
+      background: var(--floor-image) bottom center / auto 100% repeat-x;
+      mask-image: linear-gradient(180deg, transparent 0%, #000 60%);
+    }}
+    .aero-deep-floor::after {{
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(180deg, rgba(4,30,48,0.72),
+        rgba(6,45,70,0.5) 45%, rgba(8,55,84,0.4));
+    }}
+    .aero-dehumidifier {{
+      position: absolute;
+      right: 6%;
+      bottom: min(88px, 11vw);
+      width: clamp(130px, 15vw, 200px);
+      aspect-ratio: 640 / 427;
+      background: var(--dehumidifier-image) bottom / contain no-repeat;
+      filter: brightness(0.88) saturate(0.92) drop-shadow(0 12px 16px rgba(2,18,30,0.6));
+    }}
+    .chart-card {{
+      position: relative;
+      margin-bottom: 26px;
+      padding: 16px 18px 10px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.95);
+      border-radius: 22px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.88), rgba(255,255,255,0.7));
+      backdrop-filter: blur(20px) saturate(1.2);
+      box-shadow: 0 12px 36px rgba(10,70,120,0.28),
+        0 0 0 1px rgba(150,225,255,0.35),
+        0 0 30px rgba(120,210,255,0.35),
+        inset 0 1px 0 rgba(255,255,255,0.95),
+        inset 0 -12px 20px rgba(150,215,245,0.3);
+    }}
+    .chart-card::before {{
+      content: "";
+      position: absolute;
+      left: 14px;
+      right: 14px;
+      top: 0;
+      height: 54px;
+      border-radius: 16px 16px 28px 28px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.65), rgba(255,255,255,0.06));
+      pointer-events: none;
+    }}
+    .chart-card::after {{
+      content: "";
+      position: absolute;
+      top: -20px;
+      bottom: -20px;
+      left: 0;
+      width: 46%;
+      background: linear-gradient(105deg, transparent 20%, rgba(255,255,255,0.5) 50%,
+        transparent 80%);
+      transform: translateX(-130%) skewX(-18deg);
+      pointer-events: none;
+      animation: sheen-sweep 1.7s ease-out 0.5s 1 both;
+    }}
+    .chart-card:hover::after {{
+      animation: sheen-sweep-again 1.1s ease-out 1 both;
+    }}
+    @keyframes sheen-sweep {{
+      to {{ transform: translateX(320%) skewX(-18deg); }}
+    }}
+    @keyframes sheen-sweep-again {{
+      from {{ transform: translateX(-130%) skewX(-18deg); }}
+      to {{ transform: translateX(320%) skewX(-18deg); }}
+    }}
+    .chart-head,
+    .chart-frame {{
+      position: relative;
+      z-index: 1;
+    }}
+    .chart-head {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 6px;
+    }}
+    .interactive-chart .uplot {{
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+    }}
+    .interactive-chart .u-legend {{
+      color: var(--ink);
       font-size: 12px;
     }}
-    .value {{
-      margin-top: 5px;
-      font-size: 20px;
-      font-weight: 650;
-      letter-spacing: 0;
-      overflow-wrap: anywhere;
+    .chart-head .chart-actions {{
+      margin: 0;
+      gap: 8px;
     }}
-    .report-link {{
-      margin: 0 0 18px;
-      font-size: 13px;
-    }}
-    .panel-grid {{
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-      gap: 10px;
-    }}
-    .panel p {{ margin: 0; color: var(--muted); }}
-    .chart {{
-      display: block;
-      width: 100%;
+    .chart-actions button {{
+      min-width: 0;
       height: auto;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #fff;
-    }}
-    .short-chart {{ margin-top: 8px; }}
-    .plot-bg {{ fill: #fbfcfd; }}
-    .grid {{ stroke: #e7ebf0; stroke-width: 1; }}
-    .axis {{ stroke: #9aa4b2; stroke-width: 1; }}
-    .event-line {{ stroke: #374151; stroke-width: 1; stroke-dasharray: 4 4; opacity: .5; }}
-    .series-line {{ fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; }}
-    .axis-label, .axis-title {{ fill: var(--muted); font-size: 12px; }}
-    .rain-bar {{ fill: #2563eb; opacity: .72; }}
-    .legend {{
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px 16px;
-      margin: 5px 0 7px;
-      color: var(--muted);
-    }}
-    .legend-item {{
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-    }}
-    .legend-swatch {{
-      display: inline-block;
-      width: 22px;
-      height: 3px;
-    }}
-    table {{
-      width: 100%;
-      border-collapse: collapse;
+      border-color: #79c3e3;
+      border-radius: 999px;
+      background: linear-gradient(180deg, #f4fdff, #c9effd 42%, #8edcf8 58%, #cdf3ff);
+      color: #0b5f9e;
       font-size: 13px;
+      font-weight: 600;
+      line-height: 1.5;
+      padding: 5px 18px;
+      box-shadow: 0 3px 8px rgba(20,90,140,0.3), inset 0 1px 0 rgba(255,255,255,0.95),
+        inset 0 -5px 8px rgba(70,170,220,0.35),
+        0 10px 10px -6px rgba(120,210,255,0.5);
     }}
-    th, td {{
-      border-bottom: 1px solid var(--line);
-      padding: 7px 8px;
-      text-align: right;
-      white-space: nowrap;
+    .chart-actions button[aria-pressed="true"] {{
+      border-color: #0a6cb4;
+      background: linear-gradient(180deg, #6fd0f2, #0f7fce 52%, #0a6cb4 60%, #4db6e6);
+      color: #fff;
+      box-shadow: 0 3px 10px rgba(10,90,150,0.45),
+        inset 0 1px 0 rgba(255,255,255,0.6),
+        inset 0 -5px 10px rgba(6,60,105,0.4),
+        0 10px 10px -6px rgba(60,180,240,0.55);
     }}
-    th:first-child, td:first-child {{ text-align: left; }}
-    .table-wrap {{ overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }}
+    footer {{
+      position: relative;
+      z-index: 1;
+      margin-top: 34px;
+      padding: 12px 18px;
+      border: 1px solid rgba(170,230,255,0.4);
+      border-radius: 16px;
+      color: #e9f7ff;
+      font-size: 13.5px;
+      background: linear-gradient(180deg, rgba(10,55,84,0.55), rgba(7,40,62,0.75));
+      backdrop-filter: blur(12px);
+      box-shadow: 0 10px 28px rgba(3,25,40,0.5), inset 0 1px 0 rgba(200,240,255,0.35);
+    }}
+    footer p {{
+      margin: 4px 0;
+    }}
+    .sources {{
+      color: #b9dcef;
+    }}
+    @media (min-width: 1400px) {{
+      :root {{ --scene-image: url("{scene_2048}"); }}
+    }}
     @media (max-width: 760px) {{
-      header, main {{ padding-left: 14px; padding-right: 14px; }}
-      h1 {{ font-size: 21px; }}
-      .value {{ font-size: 18px; }}
+      :root {{
+        --scene-image: url("{scene_960}");
+        --scene-height: 180vw;
+        --scene-waterline: 113vw;
+      }}
+      .page {{ padding-left: 14px; padding-right: 14px; }}
+      header {{ padding-top: 7vh; }}
+      .readouts {{ gap: 18px; }}
+      .readout {{
+        flex-basis: 196px;
+        width: 196px;
+        height: 196px;
+      }}
+      .readout-value {{ font-size: 44px; }}
+      .aero-dragonfly {{ display: none; }}
+      .chart-card {{ padding: 12px 10px 8px; }}
+      .chart-head {{ flex-wrap: wrap; }}
+    }}
+    @media (prefers-reduced-motion: reduce) {{
+      *,
+      *::before,
+      *::after {{
+        animation: none !important;
+      }}
     }}
   </style>
 </head>
-<body>
-  <header>
-    <h1>Basement dampness</h1>
-    <div class="subtle">
-      Updated {generated_at}; STH51 sensors, Open-Meteo humidity, and Environment Agency rainfall.
+<body class="theme-aero">
+  <div class="aero-scene-wrap" aria-hidden="true">
+    <div class="aero-sky-extend"></div>
+    <div class="aero-scene"></div>
+    <div class="aero-scene-fade"></div>
+  </div>
+  <div class="aero-deep" aria-hidden="true">
+{render_aero_bubbles()}
+    <div class="aero-fish-deep"></div>
+    <div class="aero-deep-floor"></div>
+    <div class="aero-dehumidifier"></div>
+  </div>
+  <main class="page">
+    <div class="zone-sky">
+      <div class="zone-art" aria-hidden="true">
+        <div class="aero-aurora" style="top: 130px"></div>
+        <div class="aero-aurora aurora-2" style="top: 420px"></div>
+        <div class="aero-bokeh"
+          style="width:84px;height:84px;left:6%;top:16%;animation-duration:9s"></div>
+        <div class="aero-bokeh"
+          style="width:38px;height:38px;left:16%;top:38%;animation-duration:13s"></div>
+        <div class="aero-bokeh"
+          style="width:56px;height:56px;right:9%;top:24%;animation-duration:11s"></div>
+        <div class="aero-bokeh"
+          style="width:26px;height:26px;right:20%;top:52%;animation-duration:8s"></div>
+        <div class="aero-fish-sky" style="right:5%;top:330px"></div>
+      </div>
+      <div class="aero-dragonfly" aria-hidden="true"></div>
+      <header><h1>Watch a basement dry</h1></header>
+      {render_aero_readouts(summary)}
+      <div class="aero-scroll-hint" aria-hidden="true"><span></span></div>
     </div>
-  </header>
-  <main>
-    <section class="cards">
-      {cards_html}
-    </section>
-
-    <p class="report-link subtle"><a href="physics-report.html">Physics and metrology report</a></p>
-
-    <h2>Hypothesis Evidence</h2>
-    <section class="panel-grid">{render_hypothesis_panel(summary)}</section>
-
-    <h2>Daily Basement Trends</h2>
-    {daily_chart}
-
-    <h2>Basement Versus Outdoor Moisture</h2>
-    {humidity_chart}
-    {render_rain_chart_spec(summary.rain_chart)}
-
-    <h2>Raw Sensor Context</h2>
-    {raw_sensor_chart}
-
-    <h2>Event-Bounded Period Metrics</h2>
-    <div class="table-wrap">{render_period_table(summary.period_summaries)}</div>
+    <div class="zone-under">
+      {charts_html}
+      <footer>
+        <p>Data to {latest_reading}</p>
+        <p class="sources">Indoor readings come from thermometer&ndash;hygrometer sensors in the
+        basement, bedroom, and living room. Outdoor humidity comes from the Open-Meteo weather
+        archive. Rainfall comes from a nearby Environment Agency rain gauge.</p>
+      </footer>
+    </div>
   </main>
   {render_chart_runtime_scripts()}
 </body>
@@ -1463,6 +2361,262 @@ def render_physics_report_html(summary: SiteAnalysisSummary) -> str:
 """
 
 
+def resized_to_width(image: Image.Image, max_width: int) -> Image.Image:
+    if image.width < max_width:
+        raise ValueError(f"Cannot derive {max_width}px asset from {image.width}px source")
+    if image.width == max_width:
+        return image.copy()
+    height = round(image.height * max_width / image.width)
+    return image.resize((max_width, height), Image.Resampling.LANCZOS)
+
+
+def rgb_pixel(image: Image.Image, x_position: int, y_position: int) -> tuple[int, int, int]:
+    pixel_value = image.getpixel((x_position, y_position))
+    if not isinstance(pixel_value, tuple) or len(pixel_value) < 3:
+        raise ValueError("Expected RGB image pixel")
+    return (int(pixel_value[0]), int(pixel_value[1]), int(pixel_value[2]))
+
+
+def unblend_white(image: Image.Image) -> Image.Image:
+    rgb_image = image.convert("RGB")
+    output_image = Image.new("RGBA", rgb_image.size)
+    for y_position in range(rgb_image.height):
+        for x_position in range(rgb_image.width):
+            red, green, blue = rgb_pixel(rgb_image, x_position, y_position)
+            alpha = 255 - min(red, green, blue)
+            if alpha < 6:
+                output_image.putpixel((x_position, y_position), (0, 0, 0, 0))
+                continue
+            scale = 255 / alpha
+            output_image.putpixel(
+                (x_position, y_position),
+                (
+                    min(255, round((red - (255 - alpha)) * scale)),
+                    min(255, round((green - (255 - alpha)) * scale)),
+                    min(255, round((blue - (255 - alpha)) * scale)),
+                    alpha,
+                ),
+            )
+    return output_image
+
+
+def horizontally_seamless(image: Image.Image, overlap: int) -> Image.Image:
+    width = image.width - overlap
+    base_image = image.crop((0, 0, width, image.height)).convert("RGB")
+    tail_image = image.crop((width, 0, image.width, image.height)).convert("RGB")
+    mask = Image.new("L", (overlap, image.height))
+    for x_position in range(overlap):
+        alpha = round(255 * (1 - x_position / overlap))
+        for y_position in range(image.height):
+            mask.putpixel((x_position, y_position), alpha)
+    head_image = Image.composite(tail_image, base_image.crop((0, 0, overlap, image.height)), mask)
+    base_image.paste(head_image, (0, 0))
+    return base_image
+
+
+def key_product_shot(image: Image.Image) -> Image.Image:
+    rgb_image = image.convert("RGB")
+    width, height = rgb_image.size
+    background = [[False] * width for _ in range(height)]
+    queue: deque[tuple[int, int]] = deque()
+
+    def near_white(x_position: int, y_position: int) -> bool:
+        red, green, blue = rgb_pixel(rgb_image, x_position, y_position)
+        return min(red, green, blue) >= 246
+
+    for x_position in range(width):
+        for y_position in (0, height - 1):
+            if near_white(x_position, y_position) and not background[y_position][x_position]:
+                background[y_position][x_position] = True
+                queue.append((x_position, y_position))
+    for y_position in range(height):
+        for x_position in (0, width - 1):
+            if near_white(x_position, y_position) and not background[y_position][x_position]:
+                background[y_position][x_position] = True
+                queue.append((x_position, y_position))
+    while queue:
+        x_position, y_position = queue.popleft()
+        for next_x, next_y in (
+            (x_position - 1, y_position),
+            (x_position + 1, y_position),
+            (x_position, y_position - 1),
+            (x_position, y_position + 1),
+        ):
+            if (
+                0 <= next_x < width
+                and 0 <= next_y < height
+                and not background[next_y][next_x]
+                and near_white(next_x, next_y)
+            ):
+                background[next_y][next_x] = True
+                queue.append((next_x, next_y))
+
+    rim = [[False] * width for _ in range(height)]
+    for _ in range(2):
+        additions: list[tuple[int, int]] = []
+        for y_position in range(height):
+            for x_position in range(width):
+                if background[y_position][x_position] or rim[y_position][x_position]:
+                    continue
+                for next_x, next_y in (
+                    (x_position - 1, y_position),
+                    (x_position + 1, y_position),
+                    (x_position, y_position - 1),
+                    (x_position, y_position + 1),
+                ):
+                    if (
+                        0 <= next_x < width
+                        and 0 <= next_y < height
+                        and (background[next_y][next_x] or rim[next_y][next_x])
+                    ):
+                        additions.append((x_position, y_position))
+                        break
+        for x_position, y_position in additions:
+            rim[y_position][x_position] = True
+
+    shadow_top = round(height * 0.78)
+    output_image = Image.new("RGBA", rgb_image.size)
+    for y_position in range(height):
+        for x_position in range(width):
+            red, green, blue = rgb_pixel(rgb_image, x_position, y_position)
+            if background[y_position][x_position]:
+                output_image.putpixel((x_position, y_position), (0, 0, 0, 0))
+                continue
+            minimum = min(red, green, blue)
+            chroma = max(red, green, blue) - minimum
+            soften = rim[y_position][x_position] or (
+                y_position >= shadow_top and chroma <= 14 and minimum >= 190
+            )
+            if not soften:
+                output_image.putpixel((x_position, y_position), (red, green, blue, 255))
+                continue
+            alpha = 255 - minimum
+            if alpha < 6:
+                output_image.putpixel((x_position, y_position), (0, 0, 0, 0))
+                continue
+            scale = 255 / alpha
+            output_image.putpixel(
+                (x_position, y_position),
+                (
+                    min(255, round((red - (255 - alpha)) * scale)),
+                    min(255, round((green - (255 - alpha)) * scale)),
+                    min(255, round((blue - (255 - alpha)) * scale)),
+                    alpha,
+                ),
+            )
+    return output_image
+
+
+def webp_bytes(image: Image.Image, quality: int) -> bytes:
+    buffer = io.BytesIO()
+    image.save(buffer, "WEBP", quality=quality, method=6)
+    return buffer.getvalue()
+
+
+def render_frutiger_aero_assets(
+    source_dir: Path = FRUTIGER_AERO_SOURCE_DIR,
+) -> dict[str, RenderedSiteAsset]:
+    assets: dict[str, RenderedSiteAsset] = {}
+
+    def add_webp(
+        filename: str,
+        image: Image.Image,
+        quality: int,
+        source_name: str,
+    ) -> None:
+        relative_path = f"{FRUTIGER_AERO_ASSET_PREFIX}/{filename}"
+        assets[relative_path] = RenderedSiteAsset(
+            relative_path=relative_path,
+            content=webp_bytes(image, quality=quality),
+            content_type="image/webp",
+            cache_control=FRUTIGER_AERO_CACHE_CONTROL,
+            source_name=source_name,
+            width=image.width,
+            height=image.height,
+        )
+
+    scene_source_name = "tall-scene-source.webp"
+    with Image.open(source_dir / scene_source_name) as raw_scene:
+        scene = raw_scene.convert("RGB")
+    for width in FRUTIGER_AERO_SCENE_WIDTHS:
+        add_webp(
+            filename=f"tall-scene-{width}.webp",
+            image=resized_to_width(scene, width),
+            quality=80,
+            source_name=scene_source_name,
+        )
+
+    floor_source_name = "floor-strip.png"
+    with Image.open(source_dir / floor_source_name) as raw_floor:
+        floor = raw_floor.convert("RGB")
+    floor = floor.crop((0, FLOOR_CROP_TOP, floor.width, floor.height))
+    add_webp(
+        filename="floor-strip.webp",
+        image=horizontally_seamless(floor, FLOOR_WRAP_OVERLAP),
+        quality=80,
+        source_name=floor_source_name,
+    )
+
+    dehumidifier_source_name = "dehumidifier-no-shadow.png"
+    with Image.open(source_dir / dehumidifier_source_name) as raw_dehumidifier:
+        dehumidifier = key_product_shot(raw_dehumidifier)
+    add_webp(
+        filename="dehumidifier.webp",
+        image=resized_to_width(dehumidifier, DEHUMIDIFIER_MAX_WIDTH),
+        quality=82,
+        source_name=dehumidifier_source_name,
+    )
+
+    for source_name, max_width in AERO_CUTOUT_MAX_WIDTHS.items():
+        with Image.open(source_dir / source_name) as raw_cutout:
+            cutout = unblend_white(resized_to_width(raw_cutout, max_width))
+        add_webp(
+            filename=f"{Path(source_name).stem}.webp",
+            image=cutout,
+            quality=78,
+            source_name=source_name,
+        )
+
+    manifest_entries: list[dict[str, JsonValue]] = [
+        {
+            "path": asset.relative_path,
+            "contentType": asset.content_type,
+            "cacheControl": asset.cache_control,
+            "source": asset.source_name,
+            "width": asset.width,
+            "height": asset.height,
+            "bytes": len(asset.content),
+        }
+        for asset in sorted(assets.values(), key=lambda item: item.relative_path)
+    ]
+    manifest_path = f"{FRUTIGER_AERO_ASSET_PREFIX}/manifest.json"
+    manifest_content = json.dumps(
+        {
+            "theme": "frutiger-aero",
+            "cacheControl": FRUTIGER_AERO_CACHE_CONTROL,
+            "assets": manifest_entries,
+            "sceneSrcset": [
+                f"{FRUTIGER_AERO_ASSET_PREFIX}/tall-scene-{width}.webp {width}w"
+                for width in FRUTIGER_AERO_SCENE_WIDTHS
+            ],
+        },
+        indent=2,
+        sort_keys=True,
+    ).encode("utf-8")
+    assets[manifest_path] = RenderedSiteAsset(
+        relative_path=manifest_path,
+        content=manifest_content,
+        content_type="application/json; charset=utf-8",
+        cache_control=FRUTIGER_AERO_CACHE_CONTROL,
+        source_name="generated",
+    )
+    return assets
+
+
+def render_site_assets() -> dict[str, RenderedSiteAsset]:
+    return render_frutiger_aero_assets()
+
+
 def render_site_pages(summary: SiteAnalysisSummary) -> dict[str, str]:
     """Render every published site page to a relative object path -> HTML string mapping.
 
@@ -1472,8 +2626,12 @@ def render_site_pages(summary: SiteAnalysisSummary) -> dict[str, str]:
     """
     return {
         "index.html": render_index_html(summary),
-        "physics-report.html": render_physics_report_html(summary),
     }
+
+
+def render_private_report_pages(summary: SiteAnalysisSummary) -> dict[str, str]:
+    """Render local-only analysis pages that are not part of the public site."""
+    return {"physics-report.html": render_physics_report_html(summary)}
 
 
 def write_site_pages(pages: Mapping[str, str], output_dir: Path) -> dict[str, Path]:
@@ -1488,6 +2646,21 @@ def write_site_pages(pages: Mapping[str, str], output_dir: Path) -> dict[str, Pa
     return written_paths
 
 
+def write_site_assets(
+    assets: Mapping[str, RenderedSiteAsset],
+    output_dir: Path,
+) -> dict[str, Path]:
+    """Persist generated binary site assets under `output_dir`."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    written_paths: dict[str, Path] = {}
+    for relative_path, asset in assets.items():
+        destination_path = output_dir / relative_path
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        destination_path.write_bytes(asset.content)
+        written_paths[relative_path] = destination_path
+    return written_paths
+
+
 def build_static_site(
     data_dir: Path,
     output_dir: Path,
@@ -1495,6 +2668,7 @@ def build_static_site(
     curated_dataset_dir: CuratedDataRoot | None = None,
     rebuild_curated_dataset: bool = True,
     phase_recorder: PhaseRecorder | None = None,
+    include_private_report: bool = False,
 ) -> BuildResult:
     recorder = phase_recorder if phase_recorder is not None else PhaseRecorder()
     resolved_curated_dataset_dir = (
@@ -1557,11 +2731,15 @@ def build_static_site(
 
     with recorder.phase("render-site"):
         rendered_pages = render_site_pages(summary)
+        rendered_assets = render_site_assets()
+        if include_private_report:
+            rendered_pages = rendered_pages | render_private_report_pages(summary)
     with recorder.phase("write-site"):
         written_paths = write_site_pages(rendered_pages, output_dir)
+        write_site_assets(rendered_assets, output_dir)
     return BuildResult(
         index_path=written_paths["index.html"],
-        report_path=written_paths["physics-report.html"],
+        private_report_path=written_paths.get("physics-report.html"),
         curated_dataset_dir=resolved_curated_dataset_dir,
         sensor_row_count=len(sensor_readings),
         weather_hour_count=len(curated_dataset.weather_hours),

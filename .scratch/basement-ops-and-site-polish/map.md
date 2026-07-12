@@ -47,8 +47,15 @@ Standing preferences and constraints:
 - 2026-07-08 queue update: the user wants higher-resolution chart aggregates next after seeing the
   first interactive zoomed plots, so that work is ticket 09 and the cache-control ticket moved to
   ticket 15.
-- The dashboard is the design target; the physics report inherits the shell/typography, no
-  bespoke treatment.
+- The dashboard is the only design target; the physics report comes off the web entirely
+  (locally rendered artifact only — unpublishing is implementation work carried by
+  [ticket 12](issues/12-grill-mockup-winner-and-implementation.md)).
+- 2026-07-11 fidelity lesson: implementation tickets must carry design-spec details **verbatim**
+  (exact label strings, unit glyphs, reference-file pointers), not paraphrased acceptance
+  criteria, and porting work must diff rendered output against the prototype reference files —
+  tickets 18/19 paraphrased and drifted (axis "{quantity} / {unit}" rule lost, chart skin
+  under-ported), which
+  [ticket 23](issues/23-close-prototype-fidelity-gaps.md) now corrects before the deploy gate.
 - Key review facts: EA rainfall API retains only ~4 weeks (station `270397`); Open-Meteo archive
   covers full history and currently returns no nulls; the pipeline bucket holds stale `site/`
   prefix objects; GitHub disables cron workflows in public repos after 60 days without activity;
@@ -96,15 +103,76 @@ Standing preferences and constraints:
   `raw_email_ingest.py`) reused by modules and tests; the tofu `zone_name` default is gone
   (real value in gitignored tfvars, `example.com` placeholder in the example); TS test fixtures
   use `example.test`, leaving the wrangler route as the only hardcoded domain in code.
+- [Bump SHA-pinned workflow actions off deprecated Node 20](issues/13-bump-pinned-actions-node20.md) —
+  `actions/checkout` v4.3.1 → v7.0.0 and `astral-sh/setup-uv` v5.4.2 → v8.3.2, SHA-pinned against
+  upstream tag refs and merged as PR #3 after a green dispatch run with zero annotations; no
+  breaking changes in the skipped majors affect this schedule/dispatch-only workflow.
+- [Add Cache-Control to the site Worker](issues/15-site-worker-cache-control.md) — the site
+  Worker now sends `public, max-age=600, no-transform` and answers matching `If-None-Match` with
+  bodyless 304s via R2 `onlyIf`; browser-only caching, deliberately no edge cache; deployed and
+  verified live.
+- [Prototype redesign mockups](issues/11-prototype-redesign-mockups.md) — three skins built
+  over real data; instrument panel and Frutiger Aero survive ("fantastic"), spring/wet moss
+  dropped; reaction round also amended the page spec: hover values carry units and the room
+  comparison splits into three single-measure charts (five charts total). Round 2
+  (re-resolved 2026-07-11) built the extreme descent skin — sky → shoreline → waterline →
+  underwater, orb readouts, water-styled charts — over the five final ChatGPT assets;
+  User's reactions ask for composition rework (one tall scene image, fold-first layout,
+  simpler underwater, possible basement nod), captured as
+  [Refine the extreme aero descent](issues/16-refine-extreme-aero-descent.md).
+- [Refine the extreme aero descent](issues/16-refine-extreme-aero-descent.md) — round 3
+  accepted and **Frutiger Aero declared the winner**: one tall scene image (sky → hills →
+  waterline pinned at 92vh) replaces the stitched scene, fold-first layout with all five
+  charts starting just below the fold, gradient + bubbles below the water, concrete floor +
+  keyed CGI dehumidifier as the basement nod (brick walls generated but rejected); desktop
+  sun crop accepted; five keeper assets, palettes re-validated, instrument page untouched.
+- [Grill the site redesign direction](issues/10-grill-site-redesign-direction.md) — 3D is mood
+  not spec; three mockup candidates (instrument panel, spring/wet-moss, Frutiger Aero) over one
+  fixed page spec: "Watch a basement dry" title, hero readouts + three charts (basement
+  RH/temperature/absolute-humidity; basement-vs-outdoor absolute humidity + rainfall;
+  basement-vs-bedroom/living-room RH), footer-only freshness and sources, no other prose, no
+  metric cards/hypothesis panels/period table; physics report off the web; no build step,
+  same-origin image assets allowed; mobile touch zoom/scrub required; no unexplained
+  abbreviations.
+- [Grill the mockup winner and implementation shape](issues/12-grill-mockup-winner-and-implementation.md) —
+  round-3 Frutiger Aero wins without instrument-panel visual hybridization; production stays in
+  the Python static-site renderer with same-origin assets, responsive derivatives from the
+  upscaled tall scene, the no-shadow dehumidifier, a four-chart final lineup, mobile chart
+  interaction hardening, public report unpublishing, and a final verify/deploy gate.
+- [Production Frutiger Aero asset pipeline](issues/17-production-frutiger-aero-asset-pipeline.md) —
+  the production build now owns the final Frutiger Aero source art, generates responsive WebP
+  derivatives plus a manifest, packages those sources, uploads the generated assets to R2, and
+  serves only the allowed same-origin asset paths through the site Worker.
+- [Unpublish public physics report](issues/21-unpublish-public-physics-report.md) — the hosted
+  public site now publishes and serves only the dashboard plus allowed same-origin assets; the
+  report route is 404, stale R2 `physics-report.html` cleanup was executed once and verified, and
+  local private report rendering remains opt-in via `--include-private-report`.
+- [Reshape dashboard chart lineup for redesign](issues/18-reshape-dashboard-chart-lineup-for-redesign.md) —
+  the production dashboard chart contract now emits the four final redesign charts in order
+  (basement conditions, absolute humidity with hoverable hidden-scale rainfall, temperature,
+  relative humidity) with per-series units and focused coverage for titles, series membership,
+  units, rain-axis suppression, aggregation bands, and mixed-cadence gaps.
+- [Port Frutiger Aero redesign render](issues/19-port-frutiger-aero-redesign-render.md) —
+  reopened after screenshot review and re-resolved: production now ports the accepted Frutiger
+  Aero prototype details, including full-page floor/dehumidifier positioning, decorative layers,
+  Aero chart styling, same-origin theme assets, footer-only freshness/sources, and no old
+  metric/hypothesis/period/report-link sections.
+
+- [Add mobile touch chart interactions](issues/20-add-mobile-touch-chart-interactions.md) — the
+  shared chart runtime now supports one-finger scrub/tap value reading and two-finger pinch
+  zoom/pan, with `touch-action: pan-y` keeping page scroll with the browser; desktop hover,
+  wheel zoom/pan, drag-select, and range buttons verified unchanged via a 19-check Playwright
+  run at 1440x900 and 390x844 ([script](assets/ticket-20-verify-touch.mjs)).
+- [Close production fidelity gaps against the accepted prototype](issues/23-close-prototype-fidelity-gaps.md) —
+  per-measure "{quantity} / {unit}" axes with exact glyphs and `mm per hour` rainfall landed
+  verbatim, and iterative side-by-side screenshot rounds ported the remaining prototype chart
+  skin (concise legends, title-row gel buttons, borderless canvas, fixed full-history rain
+  scale, prototype heights); Rob accepted parity 2026-07-12; also fixed the private report's
+  charts, broken since the ticket-19 port by uPlot's explicit-undefined axis-font crash.
 
 ## Not yet specified
 
-- Redesign implementation tickets — what gets built, in what pieces, and whether a frontend build
-  step arrives — can only be specified after the direction grilling and mockup reaction rounds
-  ([10](issues/10-grill-site-redesign-direction.md) →
-  [12](issues/12-grill-mockup-winner-and-implementation.md)).
-- How data freshness should be surfaced on the site itself (beyond the build-info record) — may
-  fold into the redesign.
+None.
 
 ## Out of scope
 
@@ -114,7 +182,10 @@ Standing preferences and constraints:
 - Alerting, anomaly detection, and failure notifications — carried over from the previous map's
   fog; still waiting until the loop has run unattended for a while.
 - Analytical/physics/metrology improvements and publication-grade write-ups — they belong to the
-  `basement-dampness-analysis` effort's successor work, not this operations/polish map.
+  `basement-dampness-analysis` effort's successor work, not this operations/polish map. The
+  direction grill (ticket 10) added two named items to that pile: the drying-rate metric
+  (humidity rise-rate after each dehumidifier-off cycle — a net-new feature later, no
+  placeholder in the redesign) and research into what the X-Sense sensors actually sense.
 - Durable production email forwarding (X-Sense → ingest address) — still tracked as the open
   [Configure source email delivery to Cloudflare ingest](../basement-dampness-analysis/issues/20-configure-source-email-delivery-to-cloudflare-ingest.md)
   ticket on the previous map; not duplicated here.
