@@ -204,39 +204,79 @@ def test_dashboard_chart_payload_matches_final_redesign_lineup() -> None:
     axes = cast(list[dict[str, object]], absolute_humidity_payload["axes"])
 
     assert series_by_title == {
-        "Basement conditions": ["Basement relative humidity", "Basement temperature"],
-        "Absolute humidity": [
-            "Basement absolute humidity",
-            "Bedroom absolute humidity",
-            "Living room absolute humidity",
-            "Outdoor absolute humidity",
-            "Rainfall",
-        ],
-        "Temperature": [
-            "Basement temperature",
-            "Bedroom temperature",
-            "Living room temperature",
-            "Outdoor temperature",
-        ],
-        "Relative humidity": [
-            "Basement relative humidity",
-            "Bedroom relative humidity",
-            "Living room relative humidity",
-            "Outdoor relative humidity",
-        ],
+        "Basement conditions": ["Relative humidity", "Temperature"],
+        "Absolute humidity": ["Basement", "Bedroom", "Living room", "Outdoor", "Rainfall"],
+        "Temperature": ["Basement", "Bedroom", "Living room", "Outdoor"],
+        "Relative humidity": ["Basement", "Bedroom", "Living room", "Outdoor"],
     }
     assert all(series["unit"] for series in absolute_humidity_series)
     assert rain_series["kind"] == "bar"
     assert rain_series["scale"] == "rain"
-    assert rain_series["unit"] == "mm"
+    assert rain_series["unit"] == "mm per hour"
     assert axes == [
-        {"scale": "y", "label": "Absolute humidity (g/m3)", "show": True, "size": 58},
-        {"scale": "rain", "label": "", "show": False, "size": 0},
+        {
+            "scale": "ah",
+            "label": "Absolute humidity / g/m³",
+            "side": "left",
+            "show": True,
+            "size": 56,
+        },
+        {"scale": "rain", "label": "", "side": "right", "show": False, "size": 0},
     ]
     assert "Daily Basement Trends" not in dashboard_html
     assert "Basement Versus Outdoor Moisture" not in dashboard_html
     assert "Raw Sensor Context" not in dashboard_html
     assert "formatSeriesValueWithUnit(value, series)" in dashboard_html
+
+
+def test_dashboard_axes_use_verbatim_measure_slash_unit_labels() -> None:
+    """Ticket-10 rule: each measure gets a dedicated axis titled '<measure> / <unit>'."""
+    summary = build_site_analysis_summary(
+        sensor_readings=[
+            sensor_reading("2026-07-02T22:03:00", "Basement", 19.0, 70.0),
+            sensor_reading("2026-07-02T22:03:00", "Bedroom", 20.0, 60.0),
+            sensor_reading("2026-07-02T22:03:00", "Living room", 21.0, 58.0),
+        ],
+        events=[],
+        weather_hours=[weather_hour("2026-07-02T22:00:00", 17.0, 68.0)],
+        rain_readings=[RainReading(datetime.fromisoformat("2026-07-02T22:10:00"), 0.4)],
+        generated_at=datetime.fromisoformat("2026-07-05T12:00:00"),
+    )
+
+    dashboard_html = render_index_html(summary)
+
+    def axis_labels(title: str) -> list[tuple[str, str, bool]]:
+        payload = chart_payload(dashboard_html, title)
+        return [
+            (str(axis["label"]), str(axis["side"]), bool(axis["show"]))
+            for axis in cast(list[dict[str, object]], payload["axes"])
+        ]
+
+    assert axis_labels("Basement conditions") == [
+        ("Relative humidity / %", "left", True),
+        ("Temperature / °C", "right", True),
+    ]
+    assert axis_labels("Absolute humidity") == [
+        ("Absolute humidity / g/m³", "left", True),
+        ("", "right", False),
+    ]
+    assert axis_labels("Temperature") == [("Temperature / °C", "left", True)]
+    assert axis_labels("Relative humidity") == [("Relative humidity / %", "left", True)]
+
+    basement_conditions_series = cast(
+        list[dict[str, object]],
+        chart_payload(dashboard_html, "Basement conditions")["series"],
+    )
+    units_by_name = {
+        str(series["name"]): str(series["unit"]) for series in basement_conditions_series
+    }
+    assert units_by_name == {
+        "Relative humidity": "%",
+        "Temperature": "°C",
+    }
+    assert "EA rain mm/hr" not in dashboard_html
+    # Hover values keep the accepted unit glyphs and spacing rules.
+    assert 'series.unit === "%" ? formattedValue + "%"' in dashboard_html
 
 
 def test_sensor_chart_payload_uses_tiered_resolution_and_min_max_bands() -> None:
@@ -386,7 +426,7 @@ def test_dashboard_and_report_render_from_shared_summary() -> None:
         'body.classList.contains("theme-aero")',
     ):
         assert chart_hook in dashboard_html
-    assert "Data to 2026-07-02 23:00" in dashboard_html
+    assert "Data to 02 Jul 2026, 23:00" in dashboard_html
     assert "Prototype scope" not in dashboard_html
     assert 'href="index.html"' in report_html
     assert "Uncertainty Budget" in report_html

@@ -54,20 +54,25 @@ FLOOR_CROP_TOP = 500
 FLOOR_WRAP_OVERLAP = 128
 DEHUMIDIFIER_MAX_WIDTH = 640
 AERO_CUTOUT_MAX_WIDTHS = {"goldfish.png": 640, "dragonfly.png": 512}
+# Aero palette roles keyed by (chart title, series name): the prototype's single-measure
+# room charts colour the basement series with the shared basement blue (`basementRh`), not
+# the hero chart's temperature orange, so one series name can need different roles per chart.
 AERO_CHART_SERIES_ROLES = {
-    "Basement relative humidity": "basementRh",
-    "Basement temperature": "basementTemp",
-    "Basement absolute humidity": "basementAh",
-    "Outdoor absolute humidity": "outdoorAh",
-    "Rainfall": "rain",
-    "Bedroom absolute humidity": "bedroom",
-    "Bedroom temperature": "bedroom",
-    "Bedroom relative humidity": "bedroom",
-    "Living room absolute humidity": "livingRoom",
-    "Living room temperature": "livingRoom",
-    "Living room relative humidity": "livingRoom",
-    "Outdoor temperature": "outdoor",
-    "Outdoor relative humidity": "outdoor",
+    ("Basement conditions", "Relative humidity"): "basementRh",
+    ("Basement conditions", "Temperature"): "basementTemp",
+    ("Absolute humidity", "Basement"): "basementAh",
+    ("Absolute humidity", "Bedroom"): "bedroom",
+    ("Absolute humidity", "Living room"): "livingRoom",
+    ("Absolute humidity", "Outdoor"): "outdoorAh",
+    ("Absolute humidity", "Rainfall"): "rain",
+    ("Temperature", "Basement"): "basementRh",
+    ("Temperature", "Bedroom"): "bedroom",
+    ("Temperature", "Living room"): "livingRoom",
+    ("Temperature", "Outdoor"): "outdoor",
+    ("Relative humidity", "Basement"): "basementRh",
+    ("Relative humidity", "Bedroom"): "bedroom",
+    ("Relative humidity", "Living room"): "livingRoom",
+    ("Relative humidity", "Outdoor"): "outdoor",
 }
 
 type JsonValue = None | bool | int | float | str | list[JsonValue] | dict[str, JsonValue]
@@ -125,8 +130,8 @@ def slugify_identifier(value: str) -> str:
     return slug or "chart"
 
 
-def aero_chart_series_role(series_name: str) -> str:
-    return AERO_CHART_SERIES_ROLES.get(series_name, slugify_identifier(series_name))
+def aero_chart_series_role(chart_title: str, series_name: str) -> str:
+    return AERO_CHART_SERIES_ROLES.get((chart_title, series_name), slugify_identifier(series_name))
 
 
 @lru_cache(maxsize=1)
@@ -543,12 +548,12 @@ def render_uplot_time_series_chart(chart: ChartSpec, fallback_html: str) -> str:
         series_payload.append(
             {
                 "name": chart_series.name,
-                "role": aero_chart_series_role(chart_series.name),
+                "role": aero_chart_series_role(chart.title, chart_series.name),
                 "color": chart_series.color,
                 "kind": chart_series.kind,
                 "unit": chart_series.unit,
                 "scale": chart_series.scale,
-                "digits": 2,
+                "digits": 2 if chart_series.kind == "bar" else 1,
             }
         )
         if chart_series.min_points and chart_series.max_points:
@@ -557,7 +562,7 @@ def render_uplot_time_series_chart(chart: ChartSpec, fallback_html: str) -> str:
             bands_payload.append(
                 {
                     "name": chart_series.name,
-                    "role": aero_chart_series_role(chart_series.name),
+                    "role": aero_chart_series_role(chart.title, chart_series.name),
                     "color": chart_series.color,
                     "scale": chart_series.scale,
                     "lower": [
@@ -579,16 +584,25 @@ def render_uplot_time_series_chart(chart: ChartSpec, fallback_html: str) -> str:
         for event in chart.event_markers
     ]
     chart_id = f"chart-{slugify_identifier(chart.title)}"
+    covered_scales = {axis.scale for axis in chart.axes}
     payload: dict[str, JsonValue] = {
         "id": chart_id,
         "title": chart.title,
-        "yLabel": chart.y_label,
         "axes": [
-            {"scale": "y", "label": chart.y_label, "show": True, "size": 58},
             *[
-                {"scale": scale, "label": "", "show": False, "size": 0}
+                {
+                    "scale": axis.scale,
+                    "label": axis.label,
+                    "side": axis.side,
+                    "show": axis.show,
+                    "size": 56 if axis.show else 0,
+                }
+                for axis in chart.axes
+            ],
+            *[
+                {"scale": scale, "label": "", "side": "right", "show": False, "size": 0}
                 for scale in sorted(
-                    {series.scale for series in chart.series if series.scale != "y"}
+                    {series.scale for series in chart.series if series.scale not in covered_scales}
                 )
             ],
         ],
@@ -611,7 +625,6 @@ def render_uplot_rain_chart(rain_chart: RainChartSpec, fallback_html: str) -> st
     payload: dict[str, JsonValue] = {
         "id": chart_id,
         "title": rain_chart.title,
-        "yLabel": rain_chart.y_label,
         "height": rain_chart.height,
         "data": [
             [chart_timestamp_seconds(timestamp) for timestamp, _value in points],
@@ -619,16 +632,18 @@ def render_uplot_rain_chart(rain_chart: RainChartSpec, fallback_html: str) -> st
         ],
         "series": [
             {
-                "name": "EA rainfall",
+                "name": "Rainfall",
                 "role": "rain",
                 "color": "#2563eb",
                 "kind": "bar",
-                "unit": "mm",
+                "unit": "mm per hour",
                 "scale": "y",
                 "digits": 2,
             }
         ],
-        "axes": [{"scale": "y", "label": rain_chart.y_label, "show": True, "size": 58}],
+        "axes": [
+            {"scale": "y", "label": rain_chart.y_label, "side": "left", "show": True, "size": 56}
+        ],
         "bands": [],
         "events": [],
         "initialWindowSeconds": LATEST_CHART_WINDOW_SECONDS,
@@ -744,7 +759,7 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
 (function () {
   "use strict";
 
-  var latestWindowLabel = "1w";
+  var latestWindowLabel = "Week";
   var fullWindowLabel = "All";
   var aeroChartTheme = {
     roles: {
@@ -795,16 +810,15 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
     });
   }
 
-  function formatSeriesValue(value, digits) {
-    return value == null || !Number.isFinite(value) ? "n/a" : value.toFixed(digits);
-  }
-
   function formatSeriesValueWithUnit(value, series) {
-    var formattedValue = formatSeriesValue(value, series.digits);
-    if (formattedValue === "n/a" || !series.unit) {
+    if (value == null || !Number.isFinite(value)) {
+      return "\u2013";
+    }
+    var formattedValue = value.toFixed(series.digits);
+    if (!series.unit) {
       return formattedValue;
     }
-    return formattedValue + " " + series.unit;
+    return series.unit === "%" ? formattedValue + "%" : formattedValue + " " + series.unit;
   }
 
   function normalizeLineGaps(payload) {
@@ -1110,13 +1124,10 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
     if (finiteValues.length === 0) {
       return { minimum: 0, maximum: 1 };
     }
-    var minimum = Math.min.apply(null, finiteValues);
-    var maximum = Math.max.apply(null, finiteValues);
-    if (minimum === maximum) {
-      return { minimum: minimum - 1, maximum: maximum + 1 };
-    }
-    var padding = (maximum - minimum) * 0.08;
-    return { minimum: minimum - padding, maximum: maximum + padding };
+    return {
+      minimum: Math.min.apply(null, finiteValues),
+      maximum: Math.max.apply(null, finiteValues)
+    };
   }
 
   function scaleHasBars(payload, scaleKey) {
@@ -1133,13 +1144,25 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
       var scaleKey = axis.scale || "y";
       var valueBounds = scaleValueBounds(payload, scaleKey);
       if (scaleHasBars(payload, scaleKey)) {
-        scales[scaleKey] = { range: function (_plot, _minimum, maximum) {
-          return [0, Math.max(1, maximum * 1.12)];
+        // Bars keep a fixed full-history range so zooming in never inflates light rain.
+        var barMaximum = Math.max(1, valueBounds.maximum * 1.15);
+        scales[scaleKey] = { range: function () {
+          return [0, barMaximum];
         } };
         return;
       }
+      var minimum = valueBounds.minimum;
+      var maximum = valueBounds.maximum;
+      if (minimum === maximum) {
+        minimum -= 1;
+        maximum += 1;
+      } else {
+        var padding = (maximum - minimum) * 0.08;
+        minimum -= padding;
+        maximum += padding;
+      }
       scales[scaleKey] = { range: function () {
-        return [valueBounds.minimum, valueBounds.maximum];
+        return [minimum, maximum];
       } };
     });
     return scales;
@@ -1152,23 +1175,46 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
       ticks: { stroke: aeroChartTheme.grid, width: 1 },
       font: aeroChartTheme.axisFont
     } : {};
-    return [timeAxis].concat((payload.axes || [{ scale: "y", label: payload.yLabel }]).map(
+    var shownCount = 0;
+    return [timeAxis].concat(payload.axes.map(
       function (axis) {
-        return {
+        var shown = axis.show !== false;
+        var firstShown = false;
+        if (shown) {
+          shownCount += 1;
+          firstShown = shownCount === 1;
+        }
+        // Keys are only set when they carry a value: uPlot copies an explicit
+        // undefined over its own axis defaults and later crashes resolving the font.
+        var axisOptions = {
           scale: axis.scale || "y",
           label: axis.label || "",
-          show: axis.show !== false,
-          size: axis.show === false ? 0 : (axis.size || 58),
-          values: axis.show === false ? function () { return []; } : undefined,
-          ticks: axis.show === false ? { show: false } : undefined,
-          grid: axis.show === false
-            ? { show: false }
-            : (isAeroTheme() ? { stroke: aeroChartTheme.grid, width: 1 } : undefined),
-          stroke: isAeroTheme() ? aeroChartTheme.inkMuted : undefined,
-          font: isAeroTheme() ? aeroChartTheme.axisFont : undefined,
-          labelFont: isAeroTheme() ? aeroChartTheme.axisLabelFont : undefined,
-          labelGap: isAeroTheme() ? 4 : undefined
+          side: axis.side === "right" ? 1 : 3,
+          show: shown,
+          size: shown ? (axis.size || 56) : 0
         };
+        if (!shown) {
+          axisOptions.values = function () { return []; };
+          axisOptions.ticks = { show: false };
+          axisOptions.grid = { show: false };
+          return axisOptions;
+        }
+        // Only the first visible value axis draws grid lines, matching the prototype;
+        // extra axes would double-stripe the plot.
+        if (!firstShown) {
+          axisOptions.grid = { show: false };
+        }
+        if (isAeroTheme()) {
+          axisOptions.ticks = { stroke: aeroChartTheme.grid, width: 1 };
+          if (firstShown) {
+            axisOptions.grid = { stroke: aeroChartTheme.grid, width: 1 };
+          }
+          axisOptions.stroke = aeroChartTheme.inkMuted;
+          axisOptions.font = aeroChartTheme.axisFont;
+          axisOptions.labelFont = aeroChartTheme.axisLabelFont;
+          axisOptions.labelGap = 4;
+        }
+        return axisOptions;
       }
     ));
   }
@@ -1196,8 +1242,16 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
   }
 
   function addRangeControls(frame, plot, bounds) {
-    var controls = document.createElement("div");
-    controls.className = "chart-actions";
+    // The aero chart cards carry a .chart-actions container in their header so the
+    // buttons share the title row (prototype layout); the private report has no card
+    // and keeps the buttons in a row of their own above the chart.
+    var card = frame.closest(".chart-card");
+    var controls = card ? card.querySelector(".chart-actions") : null;
+    if (controls == null) {
+      controls = document.createElement("div");
+      controls.className = "chart-actions";
+      frame.insertBefore(controls, frame.firstChild);
+    }
     var latestButton = document.createElement("button");
     var fullButton = document.createElement("button");
     latestButton.type = "button";
@@ -1219,7 +1273,6 @@ CHART_BOOTSTRAP_JAVASCRIPT = r"""
       fullButton.setAttribute("aria-pressed", "true");
     });
     controls.append(latestButton, fullButton);
-    frame.insertBefore(controls, frame.firstChild);
   }
 
   function addWheelNavigation(frame, plot, bounds) {
@@ -1475,7 +1528,7 @@ def render_metric_card(label: str, value: str) -> str:
 def latest_basement_readout(summary: SiteAnalysisSummary, metric_name: str) -> str:
     chart = summary.dashboard_charts[0]
     matching_series = next(
-        series for series in chart.series if series.name == f"Basement {metric_name}"
+        series for series in chart.series if series.name.lower() == metric_name
     )
     if not matching_series.points:
         return "n/a"
@@ -1493,7 +1546,7 @@ def render_aero_readouts(summary: SiteAnalysisSummary) -> str:
         <div class="readout-label">Basement relative humidity</div>
       </div>
       <div class="readout readout-temperature">
-        <div class="readout-value">{html.escape(temperature)}<span>C</span></div>
+        <div class="readout-value">{html.escape(temperature)}<span>°C</span></div>
         <div class="readout-label">Basement temperature</div>
       </div>
     </section>
@@ -1503,7 +1556,10 @@ def render_aero_readouts(summary: SiteAnalysisSummary) -> str:
 def render_aero_chart_card(chart: ChartSpec) -> str:
     return f"""
     <section class="chart-card">
-      <div class="chart-head"><h2>{html.escape(chart.title)}</h2></div>
+      <div class="chart-head">
+        <h2>{html.escape(chart.title)}</h2>
+        <div class="chart-actions"></div>
+      </div>
       {render_chart_spec(chart)}
     </section>
     """
@@ -1534,7 +1590,7 @@ def render_aero_bubbles() -> str:
 
 def render_index_html(summary: SiteAnalysisSummary) -> str:
     charts_html = "\n".join(render_aero_chart_card(chart) for chart in summary.dashboard_charts)
-    latest_reading = format_timestamp(summary.metadata.data_window_end)
+    latest_reading = summary.metadata.data_window_end.strftime("%d %b %Y, %H:%M")
     scene_960 = frutiger_aero_asset_path("tall-scene-960.webp")
     scene_1440 = frutiger_aero_asset_path("tall-scene-1440.webp")
     scene_2048 = frutiger_aero_asset_path("tall-scene-2048.webp")
@@ -1579,15 +1635,6 @@ def render_index_html(summary: SiteAnalysisSummary) -> str:
         sans-serif;
       color: var(--ink);
       background: #073a58;
-    }}
-    body::after {{
-      content: "";
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(0,0,0,0) 36%),
-        radial-gradient(70vw 60vw at 78% 18%, rgba(184, 247, 255, 0.22), rgba(184, 247, 255, 0));
-      z-index: 5;
     }}
     .aero-scene-wrap {{
       position: absolute;
@@ -1672,8 +1719,7 @@ def render_index_html(summary: SiteAnalysisSummary) -> str:
       margin: 0;
       font-size: clamp(38px, 5.4vw, 58px);
       font-weight: 650;
-      line-height: 1.05;
-      letter-spacing: 0;
+      letter-spacing: 0.005em;
       background: linear-gradient(180deg, #04365f, #0a63a8 42%, #2ea3dc 72%, #8fdcf8);
       -webkit-background-clip: text;
       background-clip: text;
@@ -1685,7 +1731,7 @@ def render_index_html(summary: SiteAnalysisSummary) -> str:
     h2 {{
       margin: 0;
       font-size: 17px;
-      font-weight: 650;
+      font-weight: 600;
       letter-spacing: 0;
       color: #0b5f9e;
     }}
@@ -1856,18 +1902,19 @@ def render_index_html(summary: SiteAnalysisSummary) -> str:
     .aero-fish-sky,
     .aero-fish-deep {{
       position: absolute;
-      width: clamp(110px, 14vw, 185px);
       aspect-ratio: 640 / 480;
       background: var(--goldfish-image) center / contain no-repeat;
       pointer-events: none;
     }}
     .aero-fish-sky {{
+      width: clamp(110px, 14vw, 185px);
       right: 5%;
       top: 330px;
       filter: drop-shadow(0 10px 16px rgba(10,70,120,0.35));
       animation: fish-swim 11s ease-in-out infinite alternate;
     }}
     .aero-fish-deep {{
+      width: 110px;
       top: calc(100vh + 34vw);
       left: 8%;
       filter: brightness(0.35) saturate(0.4) blur(1.5px);
@@ -1986,19 +2033,28 @@ def render_index_html(summary: SiteAnalysisSummary) -> str:
       margin-bottom: 6px;
     }}
     .interactive-chart .uplot {{
-      border-color: rgba(109,188,224,0.42);
-      background: rgba(255,255,255,0.88);
+      border: 0;
+      border-radius: 0;
+      background: transparent;
     }}
     .interactive-chart .u-legend {{
       color: var(--ink);
       font-size: 12px;
     }}
+    .chart-head .chart-actions {{
+      margin: 0;
+      gap: 8px;
+    }}
     .chart-actions button {{
+      min-width: 0;
+      height: auto;
       border-color: #79c3e3;
       border-radius: 999px;
       background: linear-gradient(180deg, #f4fdff, #c9effd 42%, #8edcf8 58%, #cdf3ff);
       color: #0b5f9e;
-      font-weight: 650;
+      font-size: 13px;
+      font-weight: 600;
+      line-height: 1.5;
       padding: 5px 18px;
       box-shadow: 0 3px 8px rgba(20,90,140,0.3), inset 0 1px 0 rgba(255,255,255,0.95),
         inset 0 -5px 8px rgba(70,170,220,0.35),
@@ -2052,14 +2108,7 @@ def render_index_html(summary: SiteAnalysisSummary) -> str:
       .readout-value {{ font-size: 44px; }}
       .aero-dragonfly {{ display: none; }}
       .chart-card {{ padding: 12px 10px 8px; }}
-      .chart-head {{
-        align-items: flex-start;
-        flex-direction: column;
-      }}
-      .chart-actions {{
-        justify-content: flex-start;
-        width: 100%;
-      }}
+      .chart-head {{ flex-wrap: wrap; }}
     }}
     @media (prefers-reduced-motion: reduce) {{
       *,
@@ -2106,7 +2155,7 @@ def render_index_html(summary: SiteAnalysisSummary) -> str:
       {charts_html}
       <footer>
         <p>Data to {latest_reading}</p>
-        <p class="sources">Indoor readings come from thermometer-hygrometer sensors in the
+        <p class="sources">Indoor readings come from thermometer&ndash;hygrometer sensors in the
         basement, bedroom, and living room. Outdoor humidity comes from the Open-Meteo weather
         archive. Rainfall comes from a nearby Environment Agency rain gauge.</p>
       </footer>
