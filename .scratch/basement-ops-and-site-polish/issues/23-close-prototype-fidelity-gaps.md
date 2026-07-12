@@ -2,7 +2,7 @@
 
 Type: task
 Parent: ../map.md
-Status: claimed
+Status: resolved
 
 ## Question
 
@@ -69,6 +69,36 @@ the generic chart style (per ticket 19).
 Resolve only when **Rob has viewed the side-by-side screenshots (or the rendered build) and
 accepted parity**. An agent-only screenshot pass is not acceptance — that is exactly how the two
 previous passes slipped.
+
+## Answer
+
+Resolved in commit `17fe683`; **Rob viewed the side-by-side renders and accepted parity on
+2026-07-12**, satisfying the resolution gate.
+
+**Part A** landed verbatim: `ChartSpec` now carries per-measure `ChartAxis` entries
+(scale/label/side/show) and the four dashboard charts emit the exact ticket strings — hero
+`Relative humidity / %` (left) + `Temperature / °C` (right) on separate scales, `Absolute
+humidity / g/m³` with the rain scale still hidden, `Temperature / °C`, `Relative humidity / %`,
+rainfall unit `mm per hour`, hover formats `87.0%` / `17.9 °C` / `0.20 mm per hour` (per-series
+digits, `–` for missing), and `EA rain mm/hr` → `Rainfall / mm per hour`.
+`test_dashboard_axes_use_verbatim_measure_slash_unit_labels` pins the strings.
+
+**Part B** followed the iterate-on-screenshots method (three rounds, 1440×900 + 390×844,
+[capture script](../assets/ticket-23-screenshot-parity.mjs), stitched pairs in
+`output/playwright/ticket-23/side-by-side/`). Ports: concise prototype legend names with aero
+roles keyed by (chart, series) so basement stays blue in room charts; Week/All gel buttons on the
+card title row; borderless chart canvas on the frost panel; fixed full-history rain-bar scale;
+prototype chart heights 340/320/280/280; fold geometry/typography; non-prototype glare overlay
+removed; footer "03 Jul 2026, 12:00" format and thermometer–hygrometer en dash. Palettes
+unchanged (validated ticket-11 set), so no re-validation was required. The two-blues pairing on
+the Temperature chart (basement `#0b76c2` + outdoor `#437fff`, same as the RH chart) was flagged
+and accepted.
+
+**Bonus fix**: the private report's charts had never rendered since the ticket-19 port — uPlot
+crashes when axis options carry explicitly-undefined fonts (reproduced at HEAD). `makeAxes` now
+omits unset keys; the report renders all four charts. All 19 ticket-20 interaction checks pass
+against the new runtime ([updated script](../assets/ticket-23-verify-touch.mjs)); full suite 42
+passed, Ruff/Pyright clean.
 
 ## Comments
 
