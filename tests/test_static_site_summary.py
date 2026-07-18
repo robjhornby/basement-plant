@@ -13,9 +13,7 @@ from basement_analysis.static_site import (
     render_index_html,
     render_physics_report_html,
     render_private_report_pages,
-    render_site_assets,
     render_site_pages,
-    write_site_assets,
     write_site_pages,
 )
 from basement_analysis.summaries import (
@@ -537,56 +535,6 @@ def test_write_site_pages_persists_mapping_under_output_dir(tmp_path: Path) -> N
         assert written_paths[relative_path].read_text(encoding="utf-8") == content
 
 
-def test_render_site_assets_derives_production_frutiger_aero_manifest() -> None:
-    assets = render_site_assets()
-    expected_paths = {
-        "assets/frutiger-aero/dehumidifier.webp",
-        "assets/frutiger-aero/dragonfly.webp",
-        "assets/frutiger-aero/floor-strip.webp",
-        "assets/frutiger-aero/goldfish.webp",
-        "assets/frutiger-aero/manifest.json",
-        "assets/frutiger-aero/tall-scene-960.webp",
-        "assets/frutiger-aero/tall-scene-1440.webp",
-        "assets/frutiger-aero/tall-scene-2048.webp",
-    }
-
-    assert set(assets) == expected_paths
-    assert all(
-        asset.cache_control == "public, max-age=600, no-transform" for asset in assets.values()
-    )
-    assert all(asset.content for asset in assets.values())
-
-    manifest = cast(
-        dict[str, object],
-        json.loads(assets["assets/frutiger-aero/manifest.json"].content.decode("utf-8")),
-    )
-    entries = cast(list[dict[str, object]], manifest["assets"])
-    entries_by_path = {str(entry["path"]): entry for entry in entries}
-
-    assert set(entries_by_path) == expected_paths - {"assets/frutiger-aero/manifest.json"}
-    assert entries_by_path["assets/frutiger-aero/tall-scene-2048.webp"]["source"] == (
-        "tall-scene-source.webp"
-    )
-    assert entries_by_path["assets/frutiger-aero/tall-scene-2048.webp"]["width"] == 2048
-    assert entries_by_path["assets/frutiger-aero/tall-scene-1440.webp"]["width"] == 1440
-    assert entries_by_path["assets/frutiger-aero/tall-scene-960.webp"]["width"] == 960
-    assert entries_by_path["assets/frutiger-aero/dehumidifier.webp"]["source"] == (
-        "dehumidifier-no-shadow.png"
-    )
-    assert "tall-scene.png" not in json.dumps(manifest)
-    assert "dehumidifier.png" not in json.dumps(manifest)
-    assert "sky" not in json.dumps(manifest)
-    assert "waterline" not in json.dumps(manifest)
-    assert "grass" not in json.dumps(manifest)
-
-    source_dir = Path("src/basement_analysis/site_assets/frutiger_aero/source")
-    assert (source_dir / "tall-scene-source.webp").read_bytes() == Path(
-        "prototypes/site-redesign-mockups/assets/upscalemedia-tall-scene.webp"
-    ).read_bytes()
-    assert (source_dir / "dehumidifier-no-shadow.png").exists()
-    assert not (source_dir / "dehumidifier.png").exists()
-
-
 def summary_from_tank_series(segments: list[tuple[str, int]]) -> SiteAnalysisSummary:
     return build_site_analysis_summary(
         sensor_readings=synthetic_series(segments),
@@ -674,18 +622,3 @@ def test_site_build_survives_an_estimator_exception_with_a_warning(
     assert "The dehumidifier has filled" not in dashboard_html
     captured = capsys.readouterr()
     assert "warning" in captured.err.lower()
-
-
-def test_write_site_assets_persists_generated_binary_assets(tmp_path: Path) -> None:
-    assets = render_site_assets()
-    selected_paths = (
-        "assets/frutiger-aero/goldfish.webp",
-        "assets/frutiger-aero/manifest.json",
-    )
-    selected_assets = {relative_path: assets[relative_path] for relative_path in selected_paths}
-
-    written_paths = write_site_assets(selected_assets, tmp_path / "site")
-
-    for relative_path in selected_paths:
-        assert written_paths[relative_path] == tmp_path / "site" / relative_path
-        assert written_paths[relative_path].read_bytes() == assets[relative_path].content

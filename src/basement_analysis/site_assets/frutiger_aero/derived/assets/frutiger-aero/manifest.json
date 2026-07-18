@@ -1,0 +1,74 @@
+{
+  "assets": [
+    {
+      "bytes": 20204,
+      "cacheControl": "public, max-age=600, no-transform",
+      "contentType": "image/webp",
+      "height": 427,
+      "path": "assets/frutiger-aero/dehumidifier.webp",
+      "source": "dehumidifier-no-shadow.png",
+      "width": 640
+    },
+    {
+      "bytes": 53756,
+      "cacheControl": "public, max-age=600, no-transform",
+      "contentType": "image/webp",
+      "height": 342,
+      "path": "assets/frutiger-aero/dragonfly.webp",
+      "source": "dragonfly.png",
+      "width": 512
+    },
+    {
+      "bytes": 29874,
+      "cacheControl": "public, max-age=600, no-transform",
+      "contentType": "image/webp",
+      "height": 524,
+      "path": "assets/frutiger-aero/floor-strip.webp",
+      "source": "floor-strip.png",
+      "width": 1408
+    },
+    {
+      "bytes": 91388,
+      "cacheControl": "public, max-age=600, no-transform",
+      "contentType": "image/webp",
+      "height": 480,
+      "path": "assets/frutiger-aero/goldfish.webp",
+      "source": "goldfish.png",
+      "width": 640
+    },
+    {
+      "bytes": 123734,
+      "cacheControl": "public, max-age=600, no-transform",
+      "contentType": "image/webp",
+      "height": 2160,
+      "path": "assets/frutiger-aero/tall-scene-1440.webp",
+      "source": "tall-scene-source.webp",
+      "width": 1440
+    },
+    {
+      "bytes": 192780,
+      "cacheControl": "public, max-age=600, no-transform",
+      "contentType": "image/webp",
+      "height": 3072,
+      "path": "assets/frutiger-aero/tall-scene-2048.webp",
+      "source": "tall-scene-source.webp",
+      "width": 2048
+    },
+    {
+      "bytes": 74142,
+      "cacheControl": "public, max-age=600, no-transform",
+      "contentType": "image/webp",
+      "height": 1440,
+      "path": "assets/frutiger-aero/tall-scene-960.webp",
+      "source": "tall-scene-source.webp",
+      "width": 960
+    }
+  ],
+  "cacheControl": "public, max-age=600, no-transform",
+  "sceneSrcset": [
+    "assets/frutiger-aero/tall-scene-960.webp 960w",
+    "assets/frutiger-aero/tall-scene-1440.webp 1440w",
+    "assets/frutiger-aero/tall-scene-2048.webp 2048w"
+  ],
+  "theme": "frutiger-aero"
+}

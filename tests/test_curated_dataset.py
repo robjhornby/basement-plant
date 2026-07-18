@@ -156,6 +156,7 @@ def test_static_site_builds_from_curated_parquet_path(
     )
 
     assert result.index_path.exists()
+    assert (tmp_path / "site" / "assets" / "frutiger-aero" / "manifest.json").exists()
     assert result.private_report_path is None
     assert not (tmp_path / "site" / "physics-report.html").exists()
     assert result.sensor_row_count == 4

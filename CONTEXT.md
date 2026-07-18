@@ -45,6 +45,26 @@ _Avoid_: Dehumidifier effect, drying signal
 Moment when the dehumidifier's internal tank becomes full enough that water extraction may stop or the control behaviour changes.
 _Avoid_: Tank emptied, dehumidifier off
 
+**Extraction cycle**:
+One dehumidifier on/off oscillation while the tank has capacity, visible as a fall-and-rise oscillation in basement relative humidity on the order of tens of minutes.
+_Avoid_: Cycle (unqualified), compressor run
+
+**Cycling band**:
+The range of basement relative humidity observed during recent healthy extraction cycles, used as the reference against which a sustained rise indicates the dehumidifier has stopped extracting.
+_Avoid_: Normal range, baseline humidity
+
+**Tank-full episode**:
+Continuous period from a tank-full event to the following tank-emptied event, during which extraction cycles are absent and relative humidity rises above the cycling band. Brief resumed cycling shorter than a physically plausible refill time does not split an episode.
+_Avoid_: Downtime, outage
+
+**Fill interval**:
+Period from a tank-emptied event (or dehumidifier installation) to the next tank-full event, during which the tank accumulates water.
+_Avoid_: Cycle (unqualified), fill period
+
+**Next-full estimate**:
+Predicted date and time of the next tank-full event, anchored at the most recent tank-emptied event and derived from previously observed complete fill intervals.
+_Avoid_: Prediction (unqualified), countdown
+
 **Tank-emptied event**:
 Moment when the dehumidifier's internal tank is emptied and normal water extraction can resume if the unit had stopped or throttled because the tank was full.
 _Avoid_: Tank full, maintenance
