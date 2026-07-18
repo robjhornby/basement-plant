@@ -6,6 +6,8 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import cast
 
+import pytest
+
 from basement_analysis.static_site import (
     fetch_open_meteo_weather,
     render_index_html,
@@ -20,10 +22,12 @@ from basement_analysis.summaries import (
     Event,
     RainReading,
     SensorReading,
+    SiteAnalysisSummary,
     WeatherHour,
     absolute_humidity_g_m3,
     build_site_analysis_summary,
 )
+from synthetic_tank_series import synthetic_series
 
 
 def sensor_reading(
@@ -581,6 +585,95 @@ def test_render_site_assets_derives_production_frutiger_aero_manifest() -> None:
     ).read_bytes()
     assert (source_dir / "dehumidifier-no-shadow.png").exists()
     assert not (source_dir / "dehumidifier.png").exists()
+
+
+def summary_from_tank_series(segments: list[tuple[str, int]]) -> SiteAnalysisSummary:
+    return build_site_analysis_summary(
+        sensor_readings=synthetic_series(segments),
+        events=[],
+        weather_hours=[weather_hour("2026-07-02T22:00:00", 17.0, 68.0)],
+        rain_readings=[],
+        generated_at=datetime.fromisoformat("2026-07-10T12:00:00"),
+    )
+
+
+def assert_footer_paragraph_after_sources(dashboard_html: str, paragraph: str) -> None:
+    assert re.search(
+        r'class="sources">.*?</p>\s*<p>' + re.escape(paragraph) + r"</p>",
+        dashboard_html,
+        re.DOTALL,
+    ), f"footer paragraph not found immediately after the sources paragraph: {paragraph!r}"
+
+
+def test_footer_renders_prediction_paragraph_after_sources_paragraph() -> None:
+    summary = summary_from_tank_series([("cycling", 72), ("episode", 640), ("cycling", 36)])
+
+    dashboard_html = render_index_html(summary)
+
+    assert_footer_paragraph_after_sources(
+        dashboard_html,
+        "The dehumidifier has filled 1 times so far, removing 25 litres of water. "
+        "Dehumidifier tank predicted next full Mon 6 Jul 09:20 ± half a day.",
+    )
+
+
+def test_footer_renders_not_running_paragraph_when_episode_is_open() -> None:
+    summary = summary_from_tank_series(
+        [("cycling", 72), ("episode", 640), ("cycling", 36), ("open_episode", 300)]
+    )
+
+    dashboard_html = render_index_html(summary)
+
+    assert_footer_paragraph_after_sources(
+        dashboard_html,
+        "The dehumidifier has filled 1 times so far, removing 25 litres of water. "
+        "The dehumidifier is not running as of the latest data.",
+    )
+
+
+def test_footer_renders_overdue_paragraph_when_fill_outlasts_estimate() -> None:
+    summary = summary_from_tank_series([("cycling", 72), ("episode", 640), ("cycling", 144)])
+
+    dashboard_html = render_index_html(summary)
+
+    assert_footer_paragraph_after_sources(
+        dashboard_html,
+        "The dehumidifier has filled 1 times so far, removing 25 litres of water. "
+        "Dehumidifier tank has been filling longer than expected, it may be full at any time.",
+    )
+
+
+def test_footer_paragraph_is_omitted_with_a_warning_when_estimator_reports_failure(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Healthy cycling only: zero detectable complete fill intervals.
+    summary = summary_from_tank_series([("cycling", 72)])
+
+    dashboard_html = render_index_html(summary)
+
+    assert "The dehumidifier has filled" not in dashboard_html
+    captured = capsys.readouterr()
+    assert "warning" in captured.err.lower()
+    assert "dehumidifier" in captured.err.lower()
+
+
+def test_site_build_survives_an_estimator_exception_with_a_warning(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import basement_analysis.summaries as summaries_module
+
+    def raising_estimator(sensor_readings: object) -> object:
+        raise RuntimeError("synthetic estimator bug")
+
+    monkeypatch.setattr(summaries_module, "estimate_tank_history", raising_estimator)
+    summary = summary_from_tank_series([("cycling", 72), ("episode", 640), ("cycling", 36)])
+
+    dashboard_html = render_index_html(summary)
+
+    assert "The dehumidifier has filled" not in dashboard_html
+    captured = capsys.readouterr()
+    assert "warning" in captured.err.lower()
 
 
 def test_write_site_assets_persists_generated_binary_assets(tmp_path: Path) -> None:

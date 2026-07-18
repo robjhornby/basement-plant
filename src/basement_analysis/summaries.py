@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import math
+import sys
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Literal
+
+from basement_analysis.tank_estimator import TankEstimateFailure, estimate_tank_history
 
 ENVIRONMENT_AGENCY_RAIN_STATION = "270397"
 
@@ -203,6 +206,7 @@ class SiteAnalysisSummary:
     caveats: tuple[Caveat, ...]
     uncertainty_budget: tuple[UncertaintyBudgetRow, ...]
     appendix_tables: Mapping[str, object]
+    tank_footer_text: str | None = None
 
 
 def absolute_humidity_g_m3(temperature_c: float, relative_humidity_pct: float) -> float:
@@ -558,6 +562,7 @@ def build_site_analysis_summary(
         relative_humidity_chart,
     )
     return SiteAnalysisSummary(
+        tank_footer_text=build_tank_footer_text(sensor_readings),
         metadata=SiteMetadata(
             generated_at=generated_at or datetime.now(),
             data_window_start=dataset_start,
@@ -584,6 +589,26 @@ def build_site_analysis_summary(
             "input_files": tuple(input_files),
         },
     )
+
+
+def build_tank_footer_text(sensor_readings: Sequence[SensorReading]) -> str | None:
+    """Dehumidifier next-full footer paragraph, or None (with a build-log warning) on failure.
+
+    An estimator failure must never block site publication: it omits the
+    paragraph and prints a warning so the missing sentence stays discoverable.
+    """
+    try:
+        estimate = estimate_tank_history(sensor_readings)
+    except Exception as error:  # degrade to a footer-less build on any estimator bug
+        print(f"warning: dehumidifier tank estimator failed: {error!r}", file=sys.stderr)
+        return None
+    if isinstance(estimate, TankEstimateFailure):
+        print(
+            f"warning: dehumidifier tank footer omitted: {estimate.reason}",
+            file=sys.stderr,
+        )
+        return None
+    return estimate.footer_text
 
 
 def format_timestamp(timestamp: datetime) -> str:

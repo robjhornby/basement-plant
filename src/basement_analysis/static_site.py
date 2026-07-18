@@ -1591,6 +1591,11 @@ def render_aero_bubbles() -> str:
 def render_index_html(summary: SiteAnalysisSummary) -> str:
     charts_html = "\n".join(render_aero_chart_card(chart) for chart in summary.dashboard_charts)
     latest_reading = summary.metadata.data_window_end.strftime("%d %b %Y, %H:%M")
+    tank_footer_html = (
+        ""
+        if summary.tank_footer_text is None
+        else f"\n        <p>{html.escape(summary.tank_footer_text)}</p>"
+    )
     scene_960 = frutiger_aero_asset_path("tall-scene-960.webp")
     scene_1440 = frutiger_aero_asset_path("tall-scene-1440.webp")
     scene_2048 = frutiger_aero_asset_path("tall-scene-2048.webp")
@@ -2157,7 +2162,7 @@ def render_index_html(summary: SiteAnalysisSummary) -> str:
         <p>Data to {latest_reading}</p>
         <p class="sources">Indoor readings come from thermometer&ndash;hygrometer sensors in the
         basement, bedroom, and living room. Outdoor humidity comes from the Open-Meteo weather
-        archive. Rainfall comes from a nearby Environment Agency rain gauge.</p>
+        archive. Rainfall comes from a nearby Environment Agency rain gauge.</p>{tank_footer_html}
       </footer>
     </div>
   </main>
