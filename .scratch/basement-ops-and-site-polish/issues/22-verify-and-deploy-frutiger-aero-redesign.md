@@ -1,7 +1,7 @@
 # Verify and deploy Frutiger Aero redesign
 
 Type: task
-Status: claimed
+Status: resolved
 Parent: ../map.md
 Blocked by: 19, 20, 21, 23
 
@@ -53,3 +53,8 @@ Blocked (both actions denied by the permission classifier; need Rob):
 
 Remaining before resolve: run the two fixes, then re-verify asset 200s/content types, report
 route 404, and a browser pass at desktop + mobile widths with images actually loading.
+
+2026-07-25 resolved: both fixes landed. Headless re-verify green — all seven
+`assets/frutiger-aero/*` return 200 `image/webp`, index 200 with correct
+`cache-control`/ETag and a bodyless 304, `physics-report.html` 404, no external requests.
+Rob confirmed the visual pass and accepts the R2 object (public route 404s regardless).

@@ -15,3 +15,7 @@ This repo uses the single-context domain layout. See `docs/agents/domain.md`.
 ### Python
 
 Use `uv run` for Python commands and `uv add` / `uv remove` to manage dependencies.
+
+### Project record
+
+Observations, decisions, and landed work go in `LOG.md`, one line each: `- <date> (<who>) <thread> <saw|chose|did>: <what> [link]`. Append only, never edit. `STATUS.md` holds where things stand now.
