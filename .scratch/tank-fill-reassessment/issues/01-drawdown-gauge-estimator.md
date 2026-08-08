@@ -2,7 +2,32 @@
 
 Type: task
 Parent: ../PRD.md
-Status: ready-for-agent
+Status: done
+
+## Answer
+
+`estimate_tank_gauge(sensor_readings, tank_full_events) -> TankGauge | TankEstimateFailure` in
+`src/basement_analysis/tank_estimator.py`. Cycle detection was factored to
+`detect_extremum_indices(smoothed, kind)` so the shipped spec-verbatim trough logic is reused for
+peaks too. Drawdown uses absolute humidity (preceding peak within 120 min − trough, clamped ≥ 0);
+`tank_emptied_after` detects the emptied time from resumed cycling; calibration + live formulas per
+the PRD. `TankGauge` carries `state` ∈ {filling, full_or_overdue, not_running}; the forward fields
+(`cycles_remaining`, `time_remaining_days`, `next_full`) are `None` when not running. 7 unit tests;
+`CONTEXT.md` gained a **drawdown dose** entry.
+
+Two notes for issues 02/03:
+
+- **Snapshot validation:** production gives `DOSE_PER_TANK` 135.5 vs the workbench's 136.5, same
+  per-tank profile, scatter 21% vs 27%. The gap is the detector — production reuses the shipped
+  plateau-centre trough/peak finder (mandated here), the workbench uses a simpler one. Expected, not
+  a bug. The workbench still reproduces the FINDINGS numbers (136.5, MAE 1.27 d).
+- **Full-boundary constant:** `FULL_FRACTION_THRESHOLD = 1.0` in `tank_estimator.py`. On the snapshot
+  the live tank sits at ≈0.998 → state `filling` (next_full +8 min), where the workbench read 103%.
+  Issue 02 pins this threshold against real snapshot output.
+
+The old `estimate_tank_history` / `footer_text` path and the live footer are deliberately left
+untouched — issue 02 swaps the footer to the gauge (after Rob confirms wording), issue 03 gets the
+events into the hosted feed. The gauge is not yet wired into the site build.
 
 ## Question
 

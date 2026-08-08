@@ -2,16 +2,21 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
+from basement_analysis.summaries import SensorReading
 from basement_analysis.tank_estimator import (
     DEHUMIDIFIER_INSTALLED_AT,
     TankEstimateFailure,
+    TankGauge,
     TankHistory,
     displayed_uncertainty_days,
+    estimate_tank_gauge,
     estimate_tank_history,
     uncertainty_words,
 )
 from synthetic_tank_series import (
     CYCLE_PERIOD_MINUTES,
+    TROUGH_RH,
+    basement_reading,
     episode_gap_minutes,
     minutes_after_install,
     synthetic_series,
@@ -180,3 +185,106 @@ def test_resumed_cycling_blip_shorter_than_8_hours_does_not_split_an_episode() -
     assert result.tank_full_events == (minutes_after_install(full_minute),)
     assert result.tank_emptied_events == (minutes_after_install(emptied_minute),)
     assert result.completed_fill_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Moisture-drawdown fuel gauge (estimate_tank_gauge)
+#
+# The synthetic series is continuous 40-minute cycling with a constant per-cycle
+# absolute-humidity drawdown, so each fill interval's dose is proportional to the
+# extraction cycles it contains. Tank-full events are the *logged* timestamps we
+# pass in; tank-emptied is detected from the resumed cycling. Two logged fills at
+# minutes 2880 and 5760 give equal 72-cycle intervals — a flat calibration.
+# ---------------------------------------------------------------------------
+
+TWO_LOGGED_FILLS = (minutes_after_install(2880), minutes_after_install(5760))
+
+
+def append_flat_readings(
+    readings: list[SensorReading], from_minute: int, count: int, relative_humidity: float
+) -> list[SensorReading]:
+    """Append `count` cycle-free 1-minute readings — a stalled dehumidifier."""
+    return readings + [
+        basement_reading(minutes_after_install(from_minute + offset), relative_humidity)
+        for offset in range(count)
+    ]
+
+
+def test_gauge_reports_failure_on_empty_readings() -> None:
+    result = estimate_tank_gauge([], TWO_LOGGED_FILLS)
+
+    assert isinstance(result, TankEstimateFailure)
+    assert result.reason
+
+
+def test_gauge_reports_failure_without_logged_events() -> None:
+    readings = synthetic_series([("cycling", 72)])
+
+    result = estimate_tank_gauge(readings, [])
+
+    assert isinstance(result, TankEstimateFailure)
+    assert "tank-full event" in result.reason
+
+
+def test_gauge_calibrates_from_logged_events_even_without_an_rh_episode() -> None:
+    # Continuous cycling: no tank-full RH rebound at all (the dry-regime case that
+    # defeats episode detection). The gauge must still find two completed tanks,
+    # calibrated purely from the logged events.
+    readings = synthetic_series([("cycling", 190)])
+
+    result = estimate_tank_gauge(readings, TWO_LOGGED_FILLS)
+    signal_only = estimate_tank_history(readings)
+
+    assert isinstance(result, TankGauge)
+    assert result.completed_fill_count == 2
+    assert result.litres_removed == 50
+    # The equal 72-cycle intervals calibrate with negligible scatter.
+    assert result.uncertainty_fraction < 0.05
+    assert result.dose_per_tank > 0
+    # ...and the old RH-rebound detector finds nothing to key on in the same signal.
+    assert isinstance(signal_only, TankEstimateFailure)
+
+
+def test_gauge_reports_a_mid_tank_fill_as_filling() -> None:
+    # After the second logged fill (minute 5760) the open tank runs ~45 more
+    # cycles by the end of the data — a little under two-thirds of a 72-cycle tank.
+    readings = synthetic_series([("cycling", 190)])
+
+    result = estimate_tank_gauge(readings, TWO_LOGGED_FILLS)
+
+    assert isinstance(result, TankGauge)
+    assert result.state == "filling"
+    assert 0.55 <= result.fraction_full <= 0.70
+    assert result.litres_so_far == 25 * result.fraction_full
+    assert result.cycles_remaining is not None and 24 <= result.cycles_remaining <= 30
+    assert result.time_remaining_days is not None and 0.4 < result.time_remaining_days < 1.5
+    assert result.next_full is not None and result.next_full > readings[-1].timestamp
+
+
+def test_gauge_reports_an_overfilled_open_tank_as_full_or_overdue() -> None:
+    # The open tank runs far past one tank's worth of cycles by the end of data.
+    readings = synthetic_series([("cycling", 300)])
+
+    result = estimate_tank_gauge(readings, TWO_LOGGED_FILLS)
+
+    assert isinstance(result, TankGauge)
+    assert result.state == "full_or_overdue"
+    assert result.fraction_full > 1.0
+
+
+def test_gauge_reports_not_running_when_no_recent_cycles() -> None:
+    # One logged fill, then the unit stalls: a cycle-free tail longer than the
+    # 3-day recent window, so there is no recent rate to project.
+    cycling = synthetic_series([("cycling", 144)])
+    readings = append_flat_readings(
+        cycling, from_minute=5760, count=5000, relative_humidity=TROUGH_RH
+    )
+
+    result = estimate_tank_gauge(readings, (minutes_after_install(2880),))
+
+    assert isinstance(result, TankGauge)
+    assert result.state == "not_running"
+    assert result.completed_fill_count == 1
+    assert result.cycles_remaining is None
+    assert result.time_remaining_days is None
+    assert result.next_full is None

@@ -40,6 +40,9 @@ class BasementReading(Protocol):
     @property
     def relative_humidity_pct(self) -> float: ...
 
+    @property
+    def absolute_humidity_g_m3(self) -> float: ...
+
 
 DEHUMIDIFIER_INSTALLED_AT = datetime(2026, 7, 1, 21, 0)
 TANK_CAPACITY_LITRES = 25
@@ -179,11 +182,29 @@ def smoothed_relative_humidity(readings: Sequence[BasementReading]) -> list[floa
 
 def detect_trough_indices(smoothed: Sequence[float]) -> list[int]:
     """Extraction-cycle troughs per the spec-verbatim rules."""
-    local_minimum_indices = [
+    return detect_extremum_indices(smoothed, "trough")
+
+
+def detect_peak_indices(smoothed: Sequence[float]) -> list[int]:
+    """Extraction-cycle peaks: the trough rule applied to local maxima."""
+    return detect_extremum_indices(smoothed, "peak")
+
+
+def detect_extremum_indices(
+    smoothed: Sequence[float], kind: Literal["trough", "peak"]
+) -> list[int]:
+    """Prominent local minima (troughs) or maxima (peaks) per the spec-verbatim rules.
+
+    Troughs and peaks share the detection: a ±10-minute local extremum with at least
+    0.8 RH points of prominence against the surrounding 90 minutes, with extrema closer
+    than 15 minutes collapsed to the more extreme of the two.
+    """
+    is_trough = kind == "trough"
+    local_extremum_indices = [
         index
         for index in range(len(smoothed))
         if smoothed[index]
-        == min(
+        == (min if is_trough else max)(
             smoothed[
                 max(0, index - LOCAL_MINIMUM_HALF_WINDOW_MINUTES) : index
                 + LOCAL_MINIMUM_HALF_WINDOW_MINUTES
@@ -194,13 +215,13 @@ def detect_trough_indices(smoothed: Sequence[float]) -> list[int]:
 
     plateau_centres: list[int] = []
     run_start = 0
-    for position in range(1, len(local_minimum_indices) + 1):
+    for position in range(1, len(local_extremum_indices) + 1):
         is_run_end = (
-            position == len(local_minimum_indices)
-            or local_minimum_indices[position] != local_minimum_indices[position - 1] + 1
+            position == len(local_extremum_indices)
+            or local_extremum_indices[position] != local_extremum_indices[position - 1] + 1
         )
         if is_run_end:
-            run = local_minimum_indices[run_start:position]
+            run = local_extremum_indices[run_start:position]
             plateau_centres.append(run[len(run) // 2])
             run_start = position
 
@@ -211,14 +232,23 @@ def detect_trough_indices(smoothed: Sequence[float]) -> list[int]:
         right = smoothed[index + 1 : index + prominence_half_window + 1]
         if not left or not right:
             continue
-        prominence = min(max(left), max(right)) - smoothed[index]
+        prominence = (
+            min(max(left), max(right)) - smoothed[index]
+            if is_trough
+            else smoothed[index] - max(min(left), min(right))
+        )
         if prominence >= PROMINENCE_MINIMUM_RH_POINTS:
             prominent.append(index)
 
     collapsed: list[int] = []
     for index in prominent:
         if collapsed and index - collapsed[-1] < TROUGH_COLLAPSE_MINUTES:
-            if smoothed[index] < smoothed[collapsed[-1]]:
+            is_more_extreme = (
+                smoothed[index] < smoothed[collapsed[-1]]
+                if is_trough
+                else smoothed[index] > smoothed[collapsed[-1]]
+            )
+            if is_more_extreme:
                 collapsed[-1] = index
         else:
             collapsed.append(index)
@@ -361,3 +391,199 @@ def footer_text(
         f"{lead} Dehumidifier tank predicted next full "
         f"{format_footer_datetime(next_full_estimate)} ± {uncertainty_words(uncertainty_days)}."
     )
+
+
+# ---------------------------------------------------------------------------
+# Moisture-drawdown fuel gauge
+#
+# Replaces the calendar-days next-full model with a "litres accumulated since
+# empty" gauge. See .scratch/tank-fill-reassessment/{PRD.md,FINDINGS.md} and the
+# workbench scripts/tank_drawdown_gauge.py, which this ports into production shape.
+# Footer rendering is issue 02; getting logged events into the hosted feed is
+# issue 03 — this function is handed the tank-full events directly.
+# ---------------------------------------------------------------------------
+
+GaugeState = Literal["filling", "full_or_overdue", "not_running"]
+
+PRECEDING_PEAK_MINUTES = 120
+RECENT_WINDOW_DAYS = 3
+RESUME_MINIMUM_DELAY_MINUTES = 30
+RESUME_MINIMUM_TROUGHS = 3
+RESUME_WINDOW_MINUTES = 180
+RESUME_FALLBACK_HOURS = 6
+# filling -> full_or_overdue boundary; issue 02 pins the final value vs the real snapshot.
+FULL_FRACTION_THRESHOLD = 1.0
+
+
+@dataclass(frozen=True)
+class DrawdownCycle:
+    """One extraction cycle's moisture drawdown: the trough time and the
+    absolute-humidity drop from its preceding peak (clamped at zero)."""
+
+    trough_at: datetime
+    drawdown: float
+
+
+@dataclass(frozen=True)
+class TankGauge:
+    completed_fill_count: int
+    litres_removed: int
+    dose_per_tank: float
+    uncertainty_fraction: float
+    # Current open tank:
+    fraction_full: float
+    litres_so_far: float
+    state: GaugeState
+    cycles_remaining: int | None
+    time_remaining_days: float | None
+    next_full: datetime | None
+
+
+def estimate_tank_gauge(
+    sensor_readings: Sequence[BasementReading],
+    tank_full_events: Sequence[datetime],
+) -> TankGauge | TankEstimateFailure:
+    """Moisture-drawdown fuel gauge for the current open tank.
+
+    Calibrated from the owner-logged `tank_full_events` (not RH-rebound detection,
+    which is unreliable in the dry regime). Tank-emptied times are still detected
+    from the signal — cycling clearly resumes after a refill.
+    """
+    basement_readings = sorted(
+        (
+            reading
+            for reading in sensor_readings
+            if reading.location == "Basement"
+            and reading.timestamp >= DEHUMIDIFIER_INSTALLED_AT
+        ),
+        key=lambda reading: reading.timestamp,
+    )
+    if not basement_readings:
+        return TankEstimateFailure(
+            reason="no basement readings at or after the dehumidifier installation"
+        )
+    full_events = sorted(tank_full_events)
+    if not full_events:
+        return TankEstimateFailure(reason="no logged tank-full events to calibrate from")
+
+    timestamps = [reading.timestamp for reading in basement_readings]
+    smoothed = smoothed_relative_humidity(basement_readings)
+    cycles = drawdown_cycles(basement_readings, timestamps, smoothed)
+    trough_times = [timestamps[index] for index in detect_trough_indices(smoothed)]
+
+    emptied_events = [tank_emptied_after(event, trough_times) for event in full_events]
+    interval_starts = [DEHUMIDIFIER_INSTALLED_AT, *emptied_events[:-1]]
+    tank_doses = [
+        drawdown_dose(cycles, start, full)
+        for start, full in zip(interval_starts, full_events, strict=True)
+    ]
+    dose_per_tank = statistics.mean(tank_doses)
+    if dose_per_tank <= 0:
+        return TankEstimateFailure(reason="no extraction cycles across completed tanks")
+    uncertainty_fraction = statistics.pstdev(tank_doses) / dose_per_tank
+
+    latest_reading_at = timestamps[-1]
+    open_dose = drawdown_dose(cycles, emptied_events[-1], latest_reading_at)
+    fraction_full = open_dose / dose_per_tank
+    remaining_dose = max(0.0, dose_per_tank - open_dose)
+
+    recent_cycles = [
+        cycle
+        for cycle in cycles
+        if latest_reading_at - timedelta(days=RECENT_WINDOW_DAYS)
+        <= cycle.trough_at
+        <= latest_reading_at
+    ]
+
+    cycles_remaining: int | None = None
+    time_remaining_days: float | None = None
+    next_full: datetime | None = None
+    if not recent_cycles:
+        state: GaugeState = "not_running"
+    else:
+        recent_rate = sum(cycle.drawdown for cycle in recent_cycles) / RECENT_WINDOW_DAYS
+        recent_drawdown_per_cycle = statistics.median(cycle.drawdown for cycle in recent_cycles)
+        if recent_rate > 0:
+            time_remaining_days = remaining_dose / recent_rate
+            next_full = latest_reading_at + timedelta(days=time_remaining_days)
+        if recent_drawdown_per_cycle > 0:
+            cycles_remaining = round(remaining_dose / recent_drawdown_per_cycle)
+        if (
+            fraction_full >= FULL_FRACTION_THRESHOLD
+            or next_full is None
+            or next_full < latest_reading_at
+        ):
+            state = "full_or_overdue"
+        else:
+            state = "filling"
+
+    return TankGauge(
+        completed_fill_count=len(full_events),
+        litres_removed=len(full_events) * TANK_CAPACITY_LITRES,
+        dose_per_tank=dose_per_tank,
+        uncertainty_fraction=uncertainty_fraction,
+        fraction_full=fraction_full,
+        litres_so_far=TANK_CAPACITY_LITRES * fraction_full,
+        state=state,
+        cycles_remaining=cycles_remaining,
+        time_remaining_days=time_remaining_days,
+        next_full=next_full,
+    )
+
+
+def drawdown_cycles(
+    readings: Sequence[BasementReading],
+    timestamps: Sequence[datetime],
+    smoothed: Sequence[float],
+) -> list[DrawdownCycle]:
+    """One DrawdownCycle per trough that has a preceding peak within 120 minutes.
+
+    Drawdown is the absolute-humidity drop from that peak to the trough, clamped
+    at zero — the physical moisture quantity, least sensitive to sensor placement.
+    """
+    trough_indices = detect_trough_indices(smoothed)
+    peak_indices = detect_peak_indices(smoothed)
+    absolute_humidity = [reading.absolute_humidity_g_m3 for reading in readings]
+    cycles: list[DrawdownCycle] = []
+    for trough_index in trough_indices:
+        peak_index = preceding_peak_index(trough_index, peak_indices, timestamps)
+        if peak_index is None:
+            continue
+        drawdown = max(0.0, absolute_humidity[peak_index] - absolute_humidity[trough_index])
+        cycles.append(DrawdownCycle(trough_at=timestamps[trough_index], drawdown=drawdown))
+    return cycles
+
+
+def preceding_peak_index(
+    trough_index: int, peak_indices: Sequence[int], timestamps: Sequence[datetime]
+) -> int | None:
+    """The last peak within 120 minutes before the trough, or None."""
+    window = timedelta(minutes=PRECEDING_PEAK_MINUTES)
+    trough_time = timestamps[trough_index]
+    preceding = [
+        peak_index
+        for peak_index in peak_indices
+        if peak_index < trough_index and trough_time - timestamps[peak_index] <= window
+    ]
+    return preceding[-1] if preceding else None
+
+
+def drawdown_dose(cycles: Sequence[DrawdownCycle], start: datetime, end: datetime) -> float:
+    """Sum of per-cycle drawdowns for troughs falling within [start, end]."""
+    return sum(cycle.drawdown for cycle in cycles if start <= cycle.trough_at <= end)
+
+
+def tank_emptied_after(full_event: datetime, trough_times: Sequence[datetime]) -> datetime:
+    """Detected tank-emptied time: the first trough at least 30 minutes after the
+    tank-full event with cycling clearly resumed (≥ 3 troughs within the next 180
+    minutes). Falls back to the tank-full event plus 6 hours if none qualifies."""
+    resume_window = timedelta(minutes=RESUME_WINDOW_MINUTES)
+    for candidate in trough_times:
+        if candidate <= full_event + timedelta(minutes=RESUME_MINIMUM_DELAY_MINUTES):
+            continue
+        resumed = sum(
+            1 for other in trough_times if candidate <= other <= candidate + resume_window
+        )
+        if resumed >= RESUME_MINIMUM_TROUGHS:
+            return candidate
+    return full_event + timedelta(hours=RESUME_FALLBACK_HOURS)

@@ -61,6 +61,10 @@ _Avoid_: Downtime, outage
 Period from a tank-emptied event (or dehumidifier installation) to the next tank-full event, during which the tank accumulates water.
 _Avoid_: Cycle (unqualified), fill period
 
+**Drawdown dose**:
+Cumulative per-cycle absolute-humidity drawdown (each extraction cycle's preceding-peak absolute humidity minus its trough absolute humidity, clamped at zero) accumulated over an interval. Used as the moisture-drawdown fuel gauge: a proxy for litres of water condensed, since the tank holds a fixed volume. Absolute humidity is preferred over relative humidity as the physical moisture quantity, least sensitive to sensor placement. Calibrated so that one completed fill interval equals the tank capacity.
+_Avoid_: Cycle count, runtime hours, RH amplitude
+
 **Next-full estimate**:
 Predicted date and time of the next tank-full event, anchored at the most recent tank-emptied event and derived from previously observed complete fill intervals.
 _Avoid_: Prediction (unqualified), countdown
