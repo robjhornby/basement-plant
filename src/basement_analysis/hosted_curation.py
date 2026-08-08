@@ -17,6 +17,7 @@ from basement_analysis.observability import PhaseRecorder
 from basement_analysis.static_site import (
     fetch_environment_agency_rainfall,
     fetch_open_meteo_weather,
+    load_events,
     load_sensor_readings,
 )
 from basement_analysis.summaries import RainReading, SensorReading, WeatherHour
@@ -29,6 +30,7 @@ class HostedCurationResult:
     existing_sensor_row_count: int
     staged_sensor_row_count: int
     merged_sensor_row_count: int
+    event_count: int
     weather_hour_count: int
     rain_reading_count: int
 
@@ -89,6 +91,7 @@ def curate_accepted_email_csvs(
     object_store_dir: Path,
     curated_dataset_dir: Path,
     work_dir: Path,
+    events_data_dir: Path = Path("data"),
     existing_curated_dataset_root: CuratedDataRoot | None = None,
     refresh_weather: bool = True,
     phase_recorder: PhaseRecorder | None = None,
@@ -97,6 +100,14 @@ def curate_accepted_email_csvs(
     existing_root = existing_curated_dataset_root or default_existing_curated_dataset_root()
     with recorder.phase("load-existing-curated-parquet"):
         existing_dataset = load_curated_dataset(existing_root)
+
+    # Events are owner-logged in the checked-out repo's basement_events.csv, which is the full
+    # authoritative history; the curated `events` dataset in R2 was a stale seed that never
+    # refreshed. Reload from the CSV each run (the same source the local build uses) so newly
+    # logged tank-full events reach the hosted footer. Published with `s3 sync --delete`, this
+    # replaces the R2 events partition rather than merging.
+    with recorder.phase("load-manual-events"):
+        events = load_events(events_data_dir)
 
     with recorder.phase("stage-accepted-csvs"):
         csv_object_keys = accepted_csv_object_keys(object_store_dir)
@@ -140,7 +151,7 @@ def curate_accepted_email_csvs(
         write_curated_dataset(
             dataset_dir=curated_dataset_dir,
             sensor_readings=merged_sensor_readings,
-            events=existing_dataset.events,
+            events=events,
             weather_hours=weather_hours,
             rain_readings=rain_readings,
         )
@@ -150,6 +161,7 @@ def curate_accepted_email_csvs(
         existing_sensor_row_count=len(existing_dataset.sensor_readings),
         staged_sensor_row_count=len(staged_sensor_readings),
         merged_sensor_row_count=len(merged_sensor_readings),
+        event_count=len(events),
         weather_hour_count=len(weather_hours),
         rain_reading_count=len(rain_readings),
     )

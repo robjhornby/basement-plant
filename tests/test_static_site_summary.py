@@ -10,6 +10,8 @@ import pytest
 
 from basement_analysis.static_site import (
     fetch_open_meteo_weather,
+    load_events,
+    parse_local_datetime,
     render_index_html,
     render_physics_report_html,
     render_private_report_pages,
@@ -42,6 +44,27 @@ def sensor_reading(
         relative_humidity_pct=relative_humidity_pct,
         absolute_humidity_g_m3=absolute_humidity,
     )
+
+
+def test_parse_local_datetime_accepts_minute_and_second_precision() -> None:
+    assert parse_local_datetime("2026/06/28 12:40") == datetime(2026, 6, 28, 12, 40)
+    assert parse_local_datetime("2026/07/05 00:51:03") == datetime(2026, 7, 5, 0, 51, 3)
+
+
+def test_load_events_reads_seconds_precision_tank_full_rows(tmp_path: Path) -> None:
+    (tmp_path / "basement_events.csv").write_text(
+        "Time,Event\n"
+        "2026/07/01 21:00,dehumidifier installed\n"
+        "2026/07/05 00:51:03,dehumidifer tank full\n",
+        encoding="utf-8",
+    )
+
+    events = load_events(tmp_path)
+
+    assert [(event.timestamp, event.description) for event in events] == [
+        (datetime(2026, 7, 1, 21, 0), "dehumidifier installed"),
+        (datetime(2026, 7, 5, 0, 51, 3), "dehumidifer tank full"),
+    ]
 
 
 def weather_hour(

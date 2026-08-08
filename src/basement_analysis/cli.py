@@ -188,6 +188,15 @@ def curate_ingested_r2(argv: Sequence[str] | None = None) -> None:
         help="Local directory where the refreshed partitioned Parquet tree is written.",
     )
     parser.add_argument(
+        "--data-dir",
+        type=Path,
+        default=Path("data"),
+        help=(
+            "Directory containing the owner-logged basement_events.csv. These events are the "
+            "authoritative history and replace the curated events partition each run."
+        ),
+    )
+    parser.add_argument(
         "--existing-curated-data-dir",
         type=parse_curated_data_location,
         default=None,
@@ -217,6 +226,7 @@ def curate_ingested_r2(argv: Sequence[str] | None = None) -> None:
         object_store_dir=args.object_store_dir,
         curated_dataset_dir=args.curated_data_dir,
         work_dir=args.work_dir,
+        events_data_dir=args.data_dir,
         existing_curated_dataset_root=args.existing_curated_data_dir,
         refresh_weather=bool(args.refresh_weather),
         phase_recorder=recorder,
@@ -230,6 +240,7 @@ def curate_ingested_r2(argv: Sequence[str] | None = None) -> None:
             "existing_sensor_row_count": result.existing_sensor_row_count,
             "staged_sensor_row_count": result.staged_sensor_row_count,
             "merged_sensor_row_count": result.merged_sensor_row_count,
+            "event_count": result.event_count,
             "weather_hour_count": result.weather_hour_count,
             "rain_reading_count": result.rain_reading_count,
         },
@@ -238,6 +249,7 @@ def curate_ingested_r2(argv: Sequence[str] | None = None) -> None:
     print(f"Existing sensor rows: {result.existing_sensor_row_count:,}")
     print(f"Staged sensor rows: {result.staged_sensor_row_count:,}")
     print(f"Merged sensor rows: {result.merged_sensor_row_count:,}")
+    print(f"Events: {result.event_count:,}")
     print(f"Weather hours: {result.weather_hour_count:,}")
     print(f"Rain readings: {result.rain_reading_count:,}")
     print(f"Curated data: {result.curated_dataset_dir}")

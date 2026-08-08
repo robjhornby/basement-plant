@@ -92,7 +92,14 @@ class BuildResult:
 
 
 def parse_local_datetime(raw_value: str) -> datetime:
-    return datetime.strptime(raw_value, "%Y/%m/%d %H:%M")
+    # Sensor exports use minute precision; owner-logged events (basement_events.csv) mix minute
+    # precision with seconds-precision tank-full timestamps, so accept both.
+    for datetime_format in ("%Y/%m/%d %H:%M:%S", "%Y/%m/%d %H:%M"):
+        try:
+            return datetime.strptime(raw_value, datetime_format)
+        except ValueError:
+            continue
+    raise ValueError(f"Unrecognised local datetime {raw_value!r}")
 
 
 def format_timestamp(timestamp: datetime) -> str:

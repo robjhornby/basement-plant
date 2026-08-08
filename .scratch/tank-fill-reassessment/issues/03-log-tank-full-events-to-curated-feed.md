@@ -2,7 +2,9 @@
 
 Type: task
 Parent: ../PRD.md
-Status: ready-for-agent
+Status: done (2026-08-08) — hosted curate-ingested-r2 now loads events from the checked-out
+basement_events.csv instead of carrying forward the stale R2 events partition; also fixed a latent
+parse_local_datetime bug that rejected the seconds-precision tank-full timestamps. See LOG.md.
 
 ## Question
 
