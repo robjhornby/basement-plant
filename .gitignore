@@ -12,6 +12,9 @@ wheels/
 *.DS_Store
 
 data/
+# Owner-logged event history is the authoritative source the hosted build reads
+# (see hosted_curation.curate_accepted_email_csvs); it must ship in the repo.
+!data/basement_events.csv
 .envrc
 
 # Prototype run artifacts

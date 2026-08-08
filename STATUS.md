@@ -15,18 +15,18 @@ hosted curated feed). The work is uncommitted and not yet deployed.
 
 <!-- one per live line of work: name — area — one-line state — [artifact](path) -->
 
-<!-- no thread is "our move now": the tank-fill rebuild is complete in code; the next move
-     (commit + deploy, then smoke-test the live footer) is Rob's — see Awaiting. -->
-
+- incremental-load — Upkeep — nightly job re-downloads + re-parses ALL R2 CSVs every run (won't
+  scale); design for watermark-driven incremental load is written up below and needs Rob to pick
+  the shape before build — [workflow](.github/workflows/basement-site.yml)
 
 ## Awaiting
 
 <!-- someone else's move: name — area — the evidence wanted and who owns getting it — [artifact](path) -->
 
-- tank-fill-gauge — Build — rebuild complete in code (issues 01/02/03), full suite 70 green + ruff clean,
-  but everything is uncommitted (issue 03's + 02's changes) and undeployed. Waiting on Rob to say
-  ship it (commit + deploy), then a live smoke-test that the gauge footer renders on
-  https://robjhornby.com/basement/ — [PRD](.scratch/tank-fill-reassessment/PRD.md)
+- tank-fill-gauge — Build — rebuild complete in code (issues 01/02/03) plus the hosted-build fix
+  (un-ignored data/basement_events.csv), full suite 70 green + ruff clean, all uncommitted and
+  undeployed. Waiting on Rob to say ship it (commit + deploy), then a live smoke-test that the gauge
+  footer renders on https://robjhornby.com/basement/ — [PRD](.scratch/tank-fill-reassessment/PRD.md)
 
 ## Parked
 
