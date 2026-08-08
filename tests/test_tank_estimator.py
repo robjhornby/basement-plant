@@ -11,6 +11,7 @@ from basement_analysis.tank_estimator import (
     displayed_uncertainty_days,
     estimate_tank_gauge,
     estimate_tank_history,
+    gauge_footer_text,
     uncertainty_words,
 )
 from synthetic_tank_series import (
@@ -288,3 +289,83 @@ def test_gauge_reports_not_running_when_no_recent_cycles() -> None:
     assert result.cycles_remaining is None
     assert result.time_remaining_days is None
     assert result.next_full is None
+
+
+# ---------------------------------------------------------------------------
+# Fuel-gauge footer rendering (gauge_footer_text)
+#
+# Wording confirmed with the owner 2026-08-08 and pinned in issue 02. These test
+# the renderer in isolation from the signal maths (already covered above), so the
+# gauge fields — percent, litres, the full-window endpoints — are set directly.
+# ---------------------------------------------------------------------------
+
+FOOTER_LEAD = "The dehumidifier has filled 5 times so far, removing 125 litres of water."
+
+
+def gauge_with(**overrides: object) -> TankGauge:
+    fields: dict[str, object] = {
+        "completed_fill_count": 5,
+        "litres_removed": 125,
+        "dose_per_tank": 135.0,
+        "uncertainty_fraction": 0.206,
+        "fraction_full": 0.34,
+        "litres_so_far": 8.4,
+        "state": "filling",
+        "cycles_remaining": 126,
+        "time_remaining_days": 7.7,
+        "next_full": datetime(2026, 8, 11, 4, 32),
+        "full_window_days": 1.0,
+    }
+    fields.update(overrides)
+    return TankGauge(**fields)  # type: ignore[arg-type]
+
+
+def test_footer_filling_renders_percent_litres_cycles_and_signed_range() -> None:
+    # 0.34 -> 34%, 8.4 L -> 8, range = 7.7 d x 0.206 = 1.586 d -> 1.5 d -> "1½ days".
+    assert gauge_footer_text(gauge_with()) == (
+        f"{FOOTER_LEAD} The current tank is about 34% full (~8 of 25 litres) — "
+        "roughly 126 cycles left, likely full Tue 11 Aug 04:32 ± 1½ days."
+    )
+
+
+def test_footer_percent_and_litres_round_to_the_nearest_whole() -> None:
+    footer = gauge_footer_text(gauge_with(fraction_full=0.129, litres_so_far=3.2))
+
+    assert "about 13% full (~3 of 25 litres)" in footer
+
+
+def test_footer_full_or_overdue_renders_the_calibration_window() -> None:
+    footer = gauge_footer_text(
+        gauge_with(
+            state="full_or_overdue",
+            fraction_full=0.999,
+            next_full=datetime(2026, 8, 7, 0, 0),
+            full_window_days=1.0,
+        )
+    )
+
+    assert footer == (
+        f"{FOOTER_LEAD} The current tank is estimated to be full — "
+        "likely between Thu 6 Aug 00:00 and Sat 8 Aug 00:00."
+    )
+
+
+def test_footer_not_running_is_a_single_flat_sentence() -> None:
+    footer = gauge_footer_text(
+        gauge_with(
+            state="not_running",
+            cycles_remaining=None,
+            time_remaining_days=None,
+            next_full=None,
+            full_window_days=None,
+        )
+    )
+
+    assert footer == f"{FOOTER_LEAD} The dehumidifier is not running as of the latest data."
+
+
+def test_footer_filling_range_floors_at_half_a_day() -> None:
+    # A tiny time-remaining still renders a half-day range, never "0 days".
+    footer = gauge_footer_text(gauge_with(time_remaining_days=0.1))
+
+    assert footer.endswith("± half a day.")

@@ -27,7 +27,7 @@ from basement_analysis.summaries import (
     absolute_humidity_g_m3,
     build_site_analysis_summary,
 )
-from synthetic_tank_series import synthetic_series
+from synthetic_tank_series import minutes_after_install, synthetic_series
 
 
 def sensor_reading(
@@ -558,10 +558,16 @@ def test_write_site_pages_persists_mapping_under_output_dir(tmp_path: Path) -> N
         assert written_paths[relative_path].read_text(encoding="utf-8") == content
 
 
-def summary_from_tank_series(segments: list[tuple[str, int]]) -> SiteAnalysisSummary:
+def summary_from_tank_series(
+    segments: list[tuple[str, int]], tank_full_minutes: tuple[int, ...] = ()
+) -> SiteAnalysisSummary:
+    tank_full_events = [
+        Event(timestamp=minutes_after_install(minute), description="dehumidifer tank full")
+        for minute in tank_full_minutes
+    ]
     return build_site_analysis_summary(
         sensor_readings=synthetic_series(segments),
-        events=[],
+        events=tank_full_events,
         weather_hours=[weather_hour("2026-07-02T22:00:00", 17.0, 68.0)],
         rain_readings=[],
         generated_at=datetime.fromisoformat("2026-07-10T12:00:00"),
@@ -576,21 +582,22 @@ def assert_footer_paragraph_after_sources(dashboard_html: str, paragraph: str) -
     ), f"footer paragraph not found immediately after the sources paragraph: {paragraph!r}"
 
 
-def test_footer_renders_prediction_paragraph_after_sources_paragraph() -> None:
-    summary = summary_from_tank_series([("cycling", 72), ("episode", 640), ("cycling", 36)])
+def test_footer_renders_filling_paragraph_after_sources_paragraph() -> None:
+    summary = summary_from_tank_series([("cycling", 190)], tank_full_minutes=(2880, 5760))
 
     dashboard_html = render_index_html(summary)
 
     assert_footer_paragraph_after_sources(
         dashboard_html,
-        "The dehumidifier has filled 1 times so far, removing 25 litres of water. "
-        "Dehumidifier tank predicted next full Mon 6 Jul 09:20 ± half a day.",
+        "The dehumidifier has filled 2 times so far, removing 50 litres of water. "
+        "The current tank is about 62% full (~16 of 25 litres) — roughly 27 cycles left, "
+        "likely full Tue 7 Jul 21:39 ± half a day.",
     )
 
 
-def test_footer_renders_not_running_paragraph_when_episode_is_open() -> None:
+def test_footer_renders_not_running_paragraph_when_no_recent_cycles() -> None:
     summary = summary_from_tank_series(
-        [("cycling", 72), ("episode", 640), ("cycling", 36), ("open_episode", 300)]
+        [("cycling", 144), ("open_episode", 6000)], tank_full_minutes=(2880,)
     )
 
     dashboard_html = render_index_html(summary)
@@ -602,23 +609,26 @@ def test_footer_renders_not_running_paragraph_when_episode_is_open() -> None:
     )
 
 
-def test_footer_renders_overdue_paragraph_when_fill_outlasts_estimate() -> None:
-    summary = summary_from_tank_series([("cycling", 72), ("episode", 640), ("cycling", 144)])
+def test_footer_renders_full_or_overdue_paragraph_with_the_calibration_window() -> None:
+    # Uneven fill intervals give a non-zero calibration spread, so the "may be full"
+    # window has distinct endpoints; the open tank runs well past one tank's worth.
+    summary = summary_from_tank_series([("cycling", 300)], tank_full_minutes=(2000, 5760))
 
     dashboard_html = render_index_html(summary)
 
     assert_footer_paragraph_after_sources(
         dashboard_html,
-        "The dehumidifier has filled 1 times so far, removing 25 litres of water. "
-        "Dehumidifier tank has been filling longer than expected, it may be full at any time.",
+        "The dehumidifier has filled 2 times so far, removing 50 litres of water. "
+        "The current tank is estimated to be full — "
+        "likely between Thu 9 Jul 14:19 and Fri 10 Jul 19:39.",
     )
 
 
-def test_footer_paragraph_is_omitted_with_a_warning_when_estimator_reports_failure(
+def test_footer_paragraph_is_omitted_with_a_warning_without_logged_events(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    # Healthy cycling only: zero detectable complete fill intervals.
-    summary = summary_from_tank_series([("cycling", 72)])
+    # Healthy cycling but no logged tank-full events: nothing to calibrate from.
+    summary = summary_from_tank_series([("cycling", 190)])
 
     dashboard_html = render_index_html(summary)
 
@@ -634,11 +644,11 @@ def test_site_build_survives_an_estimator_exception_with_a_warning(
 ) -> None:
     import basement_analysis.summaries as summaries_module
 
-    def raising_estimator(sensor_readings: object) -> object:
+    def raising_estimator(sensor_readings: object, tank_full_events: object) -> object:
         raise RuntimeError("synthetic estimator bug")
 
-    monkeypatch.setattr(summaries_module, "estimate_tank_history", raising_estimator)
-    summary = summary_from_tank_series([("cycling", 72), ("episode", 640), ("cycling", 36)])
+    monkeypatch.setattr(summaries_module, "estimate_tank_gauge", raising_estimator)
+    summary = summary_from_tank_series([("cycling", 190)], tank_full_minutes=(2880, 5760))
 
     dashboard_html = render_index_html(summary)
 

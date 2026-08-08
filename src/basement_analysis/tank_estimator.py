@@ -411,8 +411,10 @@ RESUME_MINIMUM_DELAY_MINUTES = 30
 RESUME_MINIMUM_TROUGHS = 3
 RESUME_WINDOW_MINUTES = 180
 RESUME_FALLBACK_HOURS = 6
-# filling -> full_or_overdue boundary; issue 02 pins the final value vs the real snapshot.
-FULL_FRACTION_THRESHOLD = 1.0
+# filling -> full_or_overdue boundary, pinned against the real 2026-08-07 snapshot (issue 02):
+# the live tank sat at fraction_full 0.999, and percent renders to the nearest whole, so anything
+# from 0.95 up prints "about 100% full" and belongs in the "may be full" sentence, not "filling".
+FULL_FRACTION_THRESHOLD = 0.95
 
 
 @dataclass(frozen=True)
@@ -437,6 +439,10 @@ class TankGauge:
     cycles_remaining: int | None
     time_remaining_days: float | None
     next_full: datetime | None
+    # Calibration-spread window around next_full, in days (uncertainty_fraction *
+    # dose_per_tank / recent fill rate) - the "may be full" range for a near-full tank,
+    # which does not collapse to zero the way time_remaining * u does. None when no recent rate.
+    full_window_days: float | None
 
 
 def estimate_tank_gauge(
@@ -498,6 +504,7 @@ def estimate_tank_gauge(
     cycles_remaining: int | None = None
     time_remaining_days: float | None = None
     next_full: datetime | None = None
+    full_window_days: float | None = None
     if not recent_cycles:
         state: GaugeState = "not_running"
     else:
@@ -506,6 +513,7 @@ def estimate_tank_gauge(
         if recent_rate > 0:
             time_remaining_days = remaining_dose / recent_rate
             next_full = latest_reading_at + timedelta(days=time_remaining_days)
+            full_window_days = uncertainty_fraction * dose_per_tank / recent_rate
         if recent_drawdown_per_cycle > 0:
             cycles_remaining = round(remaining_dose / recent_drawdown_per_cycle)
         if (
@@ -528,6 +536,7 @@ def estimate_tank_gauge(
         cycles_remaining=cycles_remaining,
         time_remaining_days=time_remaining_days,
         next_full=next_full,
+        full_window_days=full_window_days,
     )
 
 
@@ -571,6 +580,52 @@ def preceding_peak_index(
 def drawdown_dose(cycles: Sequence[DrawdownCycle], start: datetime, end: datetime) -> float:
     """Sum of per-cycle drawdowns for troughs falling within [start, end]."""
     return sum(cycle.drawdown for cycle in cycles if start <= cycle.trough_at <= end)
+
+
+def half_day_words(days: float) -> str:
+    """Render a day count in words rounded to the nearest half day, floored at half a day."""
+    return uncertainty_words(max(0.5, round(days * 2) / 2))
+
+
+def gauge_footer_text(gauge: TankGauge) -> str:
+    """The site footer paragraph for a fuel-gauge estimate (issue 02, wording confirmed
+    with the owner 2026-08-08 and pinned in the issue). One state sentence after the lead.
+
+    Number formatting: percent and litres to the nearest whole; times in the dataset's
+    local-time frame as weekday + day + abbreviated month + 24-hour clock; day ranges in
+    words rounded to the nearest half day (reusing ``uncertainty_words``).
+    """
+    lead = (
+        f"The dehumidifier has filled {gauge.completed_fill_count} times so far, "
+        f"removing {gauge.litres_removed} litres of water."
+    )
+    if gauge.state == "not_running":
+        return f"{lead} The dehumidifier is not running as of the latest data."
+
+    if gauge.state == "full_or_overdue":
+        assert gauge.next_full is not None and gauge.full_window_days is not None
+        window = timedelta(days=gauge.full_window_days)
+        earliest = format_footer_datetime(gauge.next_full - window)
+        latest = format_footer_datetime(gauge.next_full + window)
+        return (
+            f"{lead} The current tank is estimated to be full — "
+            f"likely between {earliest} and {latest}."
+        )
+
+    # filling
+    assert (
+        gauge.cycles_remaining is not None
+        and gauge.time_remaining_days is not None
+        and gauge.next_full is not None
+    )
+    percent = round(gauge.fraction_full * 100)
+    litres = round(gauge.litres_so_far)
+    plus_minus = half_day_words(gauge.time_remaining_days * gauge.uncertainty_fraction)
+    return (
+        f"{lead} The current tank is about {percent}% full (~{litres} of "
+        f"{TANK_CAPACITY_LITRES} litres) — roughly {gauge.cycles_remaining} cycles left, "
+        f"likely full {format_footer_datetime(gauge.next_full)} ± {plus_minus}."
+    )
 
 
 def tank_emptied_after(full_event: datetime, trough_times: Sequence[datetime]) -> datetime:

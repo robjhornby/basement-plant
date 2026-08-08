@@ -3,11 +3,11 @@
 ## Heading
 
 Frutiger Aero dampness dashboard is shipped and live at https://robjhornby.com/basement/.
-The tank-fill predictor is being rebuilt around a moisture-drawdown "fuel gauge" (fraction-full /
+The tank-fill predictor has been rebuilt around a moisture-drawdown "fuel gauge" (fraction-full /
 cycles-remaining / time-remaining), replacing the calendar-days next-full estimate — the fill rate
-is non-stationary because the basement is drying. Issue 01 (the estimator) and issue 03 (logged
-tank-full events now reach the hosted curated feed) have landed. Only issue 02 (the footer swap)
-remains, and it is blocked on Rob confirming the footer wording.
+is non-stationary because the basement is drying. **All three issues have now landed in code:** 01
+(estimator), 02 (footer swap, wording confirmed by Rob), 03 (logged tank-full events reach the
+hosted curated feed). The work is uncommitted and not yet deployed.
 
 **Autonomy:** ask <!-- ask | go -->
 
@@ -15,17 +15,18 @@ remains, and it is blocked on Rob confirming the footer wording.
 
 <!-- one per live line of work: name — area — one-line state — [artifact](path) -->
 
-<!-- no thread is "our move now": issues 01 + 03 are done and the only remaining step (02, the
-     footer swap) is blocked on Rob — see Awaiting. -->
+<!-- no thread is "our move now": the tank-fill rebuild is complete in code; the next move
+     (commit + deploy, then smoke-test the live footer) is Rob's — see Awaiting. -->
 
 
 ## Awaiting
 
 <!-- someone else's move: name — area — the evidence wanted and who owns getting it — [artifact](path) -->
 
-- tank-fill-gauge/footer — Build — the last remaining tank-fill step (issue 02, footer swap) needs Rob
-  to confirm the footer wording (three real-state renderings) before any copy ships; estimator (01) and
-  the hosted event feed (03) are both landed, so this is all that's left — [issue 02](.scratch/tank-fill-reassessment/issues/02-footer-gauge-paragraph.md)
+- tank-fill-gauge — Build — rebuild complete in code (issues 01/02/03), full suite 70 green + ruff clean,
+  but everything is uncommitted (issue 03's + 02's changes) and undeployed. Waiting on Rob to say
+  ship it (commit + deploy), then a live smoke-test that the gauge footer renders on
+  https://robjhornby.com/basement/ — [PRD](.scratch/tank-fill-reassessment/PRD.md)
 
 ## Parked
 

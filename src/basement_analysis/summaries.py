@@ -9,7 +9,11 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
-from basement_analysis.tank_estimator import TankEstimateFailure, estimate_tank_history
+from basement_analysis.tank_estimator import (
+    TankEstimateFailure,
+    estimate_tank_gauge,
+    gauge_footer_text,
+)
 
 ENVIRONMENT_AGENCY_RAIN_STATION = "270397"
 
@@ -562,7 +566,7 @@ def build_site_analysis_summary(
         relative_humidity_chart,
     )
     return SiteAnalysisSummary(
-        tank_footer_text=build_tank_footer_text(sensor_readings),
+        tank_footer_text=build_tank_footer_text(sensor_readings, events),
         metadata=SiteMetadata(
             generated_at=generated_at or datetime.now(),
             data_window_start=dataset_start,
@@ -591,14 +595,21 @@ def build_site_analysis_summary(
     )
 
 
-def build_tank_footer_text(sensor_readings: Sequence[SensorReading]) -> str | None:
-    """Dehumidifier next-full footer paragraph, or None (with a build-log warning) on failure.
+def build_tank_footer_text(
+    sensor_readings: Sequence[SensorReading], events: Sequence[Event]
+) -> str | None:
+    """Dehumidifier fuel-gauge footer paragraph, or None (with a build-log warning) on failure.
 
-    An estimator failure must never block site publication: it omits the
-    paragraph and prints a warning so the missing sentence stays discoverable.
+    The gauge calibrates from the owner-logged tank-full events (rows whose text mentions a
+    full tank), not the RH-rebound detection that is unreliable in the dry regime. An estimator
+    failure must never block site publication: it omits the paragraph and prints a warning so
+    the missing sentence stays discoverable.
     """
+    tank_full_events = [
+        event.timestamp for event in events if "tank full" in event.description.lower()
+    ]
     try:
-        estimate = estimate_tank_history(sensor_readings)
+        estimate = estimate_tank_gauge(sensor_readings, tank_full_events)
     except Exception as error:  # degrade to a footer-less build on any estimator bug
         print(f"warning: dehumidifier tank estimator failed: {error!r}", file=sys.stderr)
         return None
@@ -608,7 +619,7 @@ def build_tank_footer_text(sensor_readings: Sequence[SensorReading]) -> str | No
             file=sys.stderr,
         )
         return None
-    return estimate.footer_text
+    return gauge_footer_text(estimate)
 
 
 def format_timestamp(timestamp: datetime) -> str:
