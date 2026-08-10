@@ -14,7 +14,7 @@ from datetime import date, datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import cast
-from urllib.error import HTTPError, URLError
+from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import urlopen
 from zoneinfo import ZoneInfo
@@ -254,9 +254,10 @@ def fetch_json_from_url(url: str) -> dict[str, object]:
         try:
             with urlopen(url, timeout=30) as response:
                 return cast(dict[str, object], json.load(response))
-        except URLError as error:
-            # A bare URLError is a network/connection blip; an HTTPError (its subclass) is only
-            # worth retrying for server-side 5xx responses, not for 4xx client errors.
+        except OSError as error:
+            # A read timeout surfaces as a bare TimeoutError (an OSError, but *not* a URLError),
+            # so catch OSError to cover it alongside URLError connection blips. An HTTPError (a
+            # URLError subclass) is only worth retrying for server-side 5xx responses, not 4xx.
             transient = not isinstance(error, HTTPError) or error.code >= 500
             if not transient or attempt == FETCH_MAX_ATTEMPTS:
                 raise

@@ -169,6 +169,26 @@ def test_fetch_json_from_url_retries_transient_server_errors(
     assert len(attempts) == 3
 
 
+def test_fetch_json_from_url_retries_read_timeouts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts: list[str] = []
+
+    def fake_urlopen(url: str, timeout: int) -> io.BytesIO:
+        attempts.append(url)
+        if len(attempts) < 3:
+            raise TimeoutError("The read operation timed out")
+        return io.BytesIO(b'{"ok": true}')
+
+    monkeypatch.setattr("basement_analysis.static_site.urlopen", fake_urlopen)
+    monkeypatch.setattr("basement_analysis.static_site.time.sleep", no_sleep)
+
+    payload = fetch_json_from_url("https://example.test/readings")
+
+    assert payload == {"ok": True}
+    assert len(attempts) == 3
+
+
 def test_fetch_json_from_url_does_not_retry_client_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
