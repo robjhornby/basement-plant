@@ -147,6 +147,72 @@ def curated_sensor_rows(dataset_dir: Path) -> list[SensorReading]:
     return list(load_curated_dataset(dataset_dir).sensor_readings)
 
 
+def test_weather_and_rain_fetch_from_their_own_recent_watermark(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Sensor history reaches back to January, but the curated weather/rain only run to early
+    # August. The fetches must start from each stream's own watermark minus OVERLAP_DAYS, not
+    # from the January dataset start — otherwise the request re-scans the whole history every run.
+    existing_dataset_dir = tmp_path / "existing-parquet"
+    write_curated_dataset(
+        dataset_dir=existing_dataset_dir,
+        sensor_readings=[
+            sensor_reading("2026-01-01T00:00:00", "Basement", 18.5, 67.2),
+            sensor_reading("2026-08-08T00:00:00", "Basement", 18.5, 67.1),
+        ],
+        events=[],
+        weather_hours=[
+            weather_hour("2026-01-01T00:00:00"),
+            weather_hour("2026-08-06T00:00:00"),
+        ],
+        rain_readings=[
+            RainReading(datetime.fromisoformat("2026-01-01T00:00:00"), 1.5),
+            RainReading(datetime.fromisoformat("2026-08-07T00:00:00"), 0.0),
+        ],
+    )
+
+    data_dir = tmp_path / "data"
+    write_events_csv(data_dir, [])
+    (tmp_path / "objects").mkdir()
+
+    captured: dict[str, date] = {}
+
+    def fake_open_meteo_weather(
+        start_date: date, end_date: date, cache_dir: Path, refresh: bool
+    ) -> list[WeatherHour]:
+        captured["weather_start"] = start_date
+        captured["weather_end"] = end_date
+        return []
+
+    def fake_environment_agency_rainfall(
+        start_date: date, end_date: date, cache_dir: Path, refresh: bool
+    ) -> list[RainReading]:
+        captured["rain_start"] = start_date
+        captured["rain_end"] = end_date
+        return []
+
+    monkeypatch.setattr(hosted_curation, "fetch_open_meteo_weather", fake_open_meteo_weather)
+    monkeypatch.setattr(
+        hosted_curation, "fetch_environment_agency_rainfall", fake_environment_agency_rainfall
+    )
+
+    curate_accepted_email_csvs(
+        object_store_root=tmp_path / "objects",
+        curated_dataset_dir=tmp_path / "curated",
+        work_dir=tmp_path / "work",
+        events_data_dir=data_dir,
+        existing_curated_dataset_root=existing_dataset_dir,
+        refresh_weather=False,
+    )
+
+    # weather watermark 2026-08-06 - OVERLAP_DAYS(2) = 2026-08-04; rain watermark 2026-08-07 - 2.
+    assert captured["weather_start"] == date(2026, 8, 4)
+    assert captured["rain_start"] == date(2026, 8, 5)
+    assert captured["weather_end"] == date(2026, 8, 8)
+    assert captured["rain_end"] == date(2026, 8, 8)
+
+
 def test_accepted_csv_keys_from_manifest_texts_only_uses_extracted_accepted_attachments() -> None:
     manifest_texts = [
         manifest_json("accepted", "extracted", "csv/source=x/a.csv"),

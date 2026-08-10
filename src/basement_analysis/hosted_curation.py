@@ -68,6 +68,23 @@ def sensor_reading_watermark(
     return max(reading.timestamp for reading in sensor_readings)
 
 
+def incremental_weather_fetch_start(
+    watermark: datetime | None,
+    dataset_start: date,
+    rebuild_all: bool,
+) -> date:
+    """First date to re-fetch from an upstream weather/rainfall API.
+
+    Mirrors the sensor-reading cutoff: begin OVERLAP_DAYS before the newest hour/reading already
+    curated so late-arriving or revised data is refreshed, but never before the sensor history
+    starts. A cold start (no existing weather/rain) or --rebuild-all re-fetches from the dataset
+    start instead.
+    """
+    if rebuild_all or watermark is None:
+        return dataset_start
+    return max(dataset_start, watermark.date() - timedelta(days=OVERLAP_DAYS))
+
+
 def object_store_connection(object_store_root: CuratedDataRoot) -> duckdb.DuckDBPyConnection:
     """A DuckDB connection that reads the object store — R2 (s3://) or a local dir — directly."""
     connection = duckdb.connect(database=":memory:")
@@ -244,20 +261,36 @@ def curate_accepted_email_csvs(
             f"under {object_store_root}"
         )
 
-    dataset_start = min(reading.timestamp for reading in merged_sensor_readings)
-    dataset_end = max(reading.timestamp for reading in merged_sensor_readings)
+    dataset_start = min(reading.timestamp for reading in merged_sensor_readings).date()
+    dataset_end = max(reading.timestamp for reading in merged_sensor_readings).date()
+
+    # Fetch weather and rainfall incrementally, each from its own watermark: the Open-Meteo
+    # archive lags the live sensor feed by a few days, so its newest curated hour trails the
+    # sensor watermark. Bounding the request to the recent window (rather than the full history
+    # from dataset_start) keeps it fast and stops the Environment Agency call — which only ever
+    # returns the last ~4 weeks and slows down the wider the range — from creeping toward the
+    # 30s timeout as the dataset grows.
+    weather_watermark = max(
+        (hour.timestamp for hour in existing_dataset.weather_hours), default=None
+    )
+    rain_watermark = max(
+        (reading.timestamp for reading in existing_dataset.rain_readings), default=None
+    )
+    weather_start = incremental_weather_fetch_start(weather_watermark, dataset_start, rebuild_all)
+    rain_start = incremental_weather_fetch_start(rain_watermark, dataset_start, rebuild_all)
+
     cache_dir = work_dir / "cache"
     with recorder.phase("fetch-open-meteo-weather"):
         fresh_weather_hours = fetch_open_meteo_weather(
-            start_date=dataset_start.date(),
-            end_date=dataset_end.date(),
+            start_date=weather_start,
+            end_date=dataset_end,
             cache_dir=cache_dir,
             refresh=refresh_weather,
         )
     with recorder.phase("fetch-environment-agency-rainfall"):
         fresh_rain_readings = fetch_environment_agency_rainfall(
-            start_date=dataset_start.date(),
-            end_date=dataset_end.date(),
+            start_date=rain_start,
+            end_date=dataset_end,
             cache_dir=cache_dir,
             refresh=refresh_weather,
         )
