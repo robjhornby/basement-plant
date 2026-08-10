@@ -171,15 +171,20 @@ def ingest_emails(argv: Sequence[str] | None = None) -> None:
 def curate_ingested_r2(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Merge accepted X-Sense CSV objects from a local R2 mirror into hosted "
+            "Read accepted X-Sense CSV objects directly from the ingest object store (R2 or a "
+            "local dir) and merge the ones newer than the curated watermark into hosted "
             "partitioned Parquet."
         )
     )
     parser.add_argument(
-        "--object-store-dir",
-        type=Path,
-        default=Path("build/r2-pipeline"),
-        help="Local directory mirroring the R2 pipeline bucket's manifests and csv prefixes.",
+        "--object-store-root",
+        type=parse_curated_data_location,
+        default=parse_curated_data_location("build/r2-pipeline"),
+        help=(
+            "Root of the ingest object store holding manifests/ingest and csv/source=x-sense: a "
+            "local directory or an s3:// URL read directly via DuckDB (R2 credentials from "
+            "R2_ENDPOINT_URL, R2_ACCESS_KEY_ID, and R2_SECRET_ACCESS_KEY)."
+        ),
     )
     parser.add_argument(
         "--curated-data-dir",
@@ -214,6 +219,15 @@ def curate_ingested_r2(argv: Sequence[str] | None = None) -> None:
         help="Ignore cached public weather API responses while rebuilding weather partitions.",
     )
     parser.add_argument(
+        "--rebuild-all",
+        action="store_true",
+        help=(
+            "Ignore the curated watermark and re-parse every accepted CSV (still merged and "
+            "deduped against the existing parquet). Use to back-apply a parsing change to the "
+            "whole history."
+        ),
+    )
+    parser.add_argument(
         "--timings-dir",
         type=Path,
         default=DEFAULT_TIMINGS_DIR,
@@ -223,12 +237,13 @@ def curate_ingested_r2(argv: Sequence[str] | None = None) -> None:
 
     recorder = PhaseRecorder()
     result = curate_accepted_email_csvs(
-        object_store_dir=args.object_store_dir,
+        object_store_root=args.object_store_root,
         curated_dataset_dir=args.curated_data_dir,
         work_dir=args.work_dir,
         events_data_dir=args.data_dir,
         existing_curated_dataset_root=args.existing_curated_data_dir,
         refresh_weather=bool(args.refresh_weather),
+        rebuild_all=bool(args.rebuild_all),
         phase_recorder=recorder,
     )
     write_command_timing_record(
@@ -237,6 +252,7 @@ def curate_ingested_r2(argv: Sequence[str] | None = None) -> None:
         recorder=recorder,
         counts={
             "accepted_csv_count": result.accepted_csv_count,
+            "selected_csv_count": result.selected_csv_count,
             "existing_sensor_row_count": result.existing_sensor_row_count,
             "staged_sensor_row_count": result.staged_sensor_row_count,
             "merged_sensor_row_count": result.merged_sensor_row_count,
@@ -245,9 +261,16 @@ def curate_ingested_r2(argv: Sequence[str] | None = None) -> None:
             "rain_reading_count": result.rain_reading_count,
         },
     )
+    watermark_text = (
+        "none (cold start / rebuild-all)"
+        if result.watermark is None
+        else (result.watermark.isoformat())
+    )
+    print(f"Watermark: {watermark_text}")
     print(f"Accepted CSV objects: {result.accepted_csv_count:,}")
+    print(f"Selected CSV objects: {result.selected_csv_count:,}")
     print(f"Existing sensor rows: {result.existing_sensor_row_count:,}")
-    print(f"Staged sensor rows: {result.staged_sensor_row_count:,}")
+    print(f"New sensor rows: {result.staged_sensor_row_count:,}")
     print(f"Merged sensor rows: {result.merged_sensor_row_count:,}")
     print(f"Events: {result.event_count:,}")
     print(f"Weather hours: {result.weather_hour_count:,}")

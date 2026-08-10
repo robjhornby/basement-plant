@@ -2,16 +2,19 @@ from __future__ import annotations
 
 import csv
 import html
+import io
 import json
 import math
 import re
 import shutil
+import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import cast
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import urlopen
 from zoneinfo import ZoneInfo
@@ -163,24 +166,30 @@ def load_sensor_readings(data_dir: Path) -> list[SensorReading]:
     readings: list[SensorReading] = []
     for csv_path in sorted(data_dir.rglob("Thermo-hygrometer*.csv")):
         location = sensor_location_for_filename(csv_path.name)
-        with csv_path.open(newline="", encoding="utf-8-sig") as csv_file:
-            reader = csv.DictReader(csv_file)
-            for row in reader:
-                timestamp = parse_local_datetime(required_csv_value(row, "Time"))
-                temperature_c = float(required_csv_value(row, "Temperature_Celsius"))
-                relative_humidity_pct = float(required_csv_value(row, "Relative Humidity_Percent"))
-                readings.append(
-                    SensorReading(
-                        timestamp=timestamp,
-                        location=location,
-                        temperature_c=temperature_c,
-                        relative_humidity_pct=relative_humidity_pct,
-                        absolute_humidity_g_m3=absolute_humidity_g_m3(
-                            temperature_c, relative_humidity_pct
-                        ),
-                    )
-                )
+        readings.extend(
+            sensor_readings_from_csv_text(csv_path.read_text(encoding="utf-8-sig"), location)
+        )
     return sorted(readings, key=lambda reading: (reading.location, reading.timestamp))
+
+
+def sensor_readings_from_csv_text(csv_text: str, location: str) -> list[SensorReading]:
+    """Parse one thermohygrometer CSV export's text into readings for `location`."""
+    readings: list[SensorReading] = []
+    reader = csv.DictReader(io.StringIO(csv_text.lstrip("\ufeff")))
+    for row in reader:
+        timestamp = parse_local_datetime(required_csv_value(row, "Time"))
+        temperature_c = float(required_csv_value(row, "Temperature_Celsius"))
+        relative_humidity_pct = float(required_csv_value(row, "Relative Humidity_Percent"))
+        readings.append(
+            SensorReading(
+                timestamp=timestamp,
+                location=location,
+                temperature_c=temperature_c,
+                relative_humidity_pct=relative_humidity_pct,
+                absolute_humidity_g_m3=absolute_humidity_g_m3(temperature_c, relative_humidity_pct),
+            )
+        )
+    return readings
 
 
 def sensor_location_for_filename(filename: str) -> str:
@@ -227,11 +236,32 @@ def fetch_json(cache_path: Path, url: str, refresh: bool) -> dict[str, object]:
             return cast(dict[str, object], json.load(cache_file))
 
     cache_path.parent.mkdir(parents=True, exist_ok=True)
-    with urlopen(url, timeout=30) as response:
-        payload = cast(dict[str, object], json.load(response))
+    payload = fetch_json_from_url(url)
     with cache_path.open("w", encoding="utf-8") as cache_file:
         json.dump(payload, cache_file, indent=2, sort_keys=True)
     return payload
+
+
+# The upstream weather APIs (Open-Meteo, Environment Agency) intermittently answer with a 5xx
+# or drop the connection; a single such blip used to abort the whole daily publish. Retry a few
+# times with a growing backoff so a transient outage no longer fails the run.
+FETCH_MAX_ATTEMPTS = 4
+FETCH_RETRY_BACKOFF_SECONDS = 5.0
+
+
+def fetch_json_from_url(url: str) -> dict[str, object]:
+    for attempt in range(1, FETCH_MAX_ATTEMPTS + 1):
+        try:
+            with urlopen(url, timeout=30) as response:
+                return cast(dict[str, object], json.load(response))
+        except URLError as error:
+            # A bare URLError is a network/connection blip; an HTTPError (its subclass) is only
+            # worth retrying for server-side 5xx responses, not for 4xx client errors.
+            transient = not isinstance(error, HTTPError) or error.code >= 500
+            if not transient or attempt == FETCH_MAX_ATTEMPTS:
+                raise
+            time.sleep(FETCH_RETRY_BACKOFF_SECONDS * attempt)
+    raise AssertionError("unreachable")  # pragma: no cover
 
 
 def fetch_open_meteo_weather(
@@ -1514,9 +1544,7 @@ def render_metric_card(label: str, value: str) -> str:
 
 def latest_basement_readout(summary: SiteAnalysisSummary, metric_name: str) -> str:
     chart = summary.dashboard_charts[0]
-    matching_series = next(
-        series for series in chart.series if series.name.lower() == metric_name
-    )
+    matching_series = next(series for series in chart.series if series.name.lower() == metric_name)
     if not matching_series.points:
         return "n/a"
     return format_optional_float(matching_series.points[-1][1], 1)

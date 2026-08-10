@@ -23,7 +23,9 @@ def test_main_dispatches_subcommands_from_console_script_argv(
         cli.main()
 
     assert exit_info.value.code == 0
-    assert "Merge accepted X-Sense CSV objects" in capsys.readouterr().out
+    assert "Read accepted X-Sense CSV objects directly from the ingest object store" in (
+        capsys.readouterr().out
+    )
 
 
 def test_build_site_command_writes_timing_record_and_build_info(

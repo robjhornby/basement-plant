@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import io
 import json
 import re
 from datetime import date, datetime
+from email.message import Message
 from pathlib import Path
 from typing import cast
+from urllib.error import HTTPError, URLError
 
 import pytest
 
 from basement_analysis.static_site import (
+    fetch_json_from_url,
     fetch_open_meteo_weather,
     load_events,
     parse_local_datetime,
@@ -135,6 +139,70 @@ def test_fetch_open_meteo_weather_drops_hours_with_null_values(tmp_path: Path) -
         datetime.fromisoformat("2026-07-03T00:00:00")
     ]
     assert weather_hours[0].temperature_c == 16.0
+
+
+def http_error(url: str, code: int, reason: str) -> HTTPError:
+    return HTTPError(url, code, reason, hdrs=Message(), fp=io.BytesIO(b""))
+
+
+def no_sleep(_seconds: float) -> None:
+    return None
+
+
+def test_fetch_json_from_url_retries_transient_server_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts: list[str] = []
+
+    def fake_urlopen(url: str, timeout: int) -> io.BytesIO:
+        attempts.append(url)
+        if len(attempts) < 3:
+            raise http_error(url, 503, "Backend fetch failed")
+        return io.BytesIO(b'{"ok": true}')
+
+    monkeypatch.setattr("basement_analysis.static_site.urlopen", fake_urlopen)
+    monkeypatch.setattr("basement_analysis.static_site.time.sleep", no_sleep)
+
+    payload = fetch_json_from_url("https://example.test/readings")
+
+    assert payload == {"ok": True}
+    assert len(attempts) == 3
+
+
+def test_fetch_json_from_url_does_not_retry_client_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts: list[str] = []
+
+    def fake_urlopen(url: str, timeout: int) -> io.BytesIO:
+        attempts.append(url)
+        raise http_error(url, 404, "Not Found")
+
+    monkeypatch.setattr("basement_analysis.static_site.urlopen", fake_urlopen)
+    monkeypatch.setattr("basement_analysis.static_site.time.sleep", no_sleep)
+
+    with pytest.raises(HTTPError):
+        fetch_json_from_url("https://example.test/readings")
+
+    assert len(attempts) == 1
+
+
+def test_fetch_json_from_url_reraises_after_exhausting_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts: list[str] = []
+
+    def fake_urlopen(url: str, timeout: int) -> io.BytesIO:
+        attempts.append(url)
+        raise URLError("connection reset")
+
+    monkeypatch.setattr("basement_analysis.static_site.urlopen", fake_urlopen)
+    monkeypatch.setattr("basement_analysis.static_site.time.sleep", no_sleep)
+
+    with pytest.raises(URLError):
+        fetch_json_from_url("https://example.test/readings")
+
+    assert len(attempts) == 4
 
 
 def test_site_analysis_summary_builds_shared_dashboard_and_report_values() -> None:

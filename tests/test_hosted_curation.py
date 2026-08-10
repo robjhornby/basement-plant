@@ -9,7 +9,7 @@ import pytest
 from basement_analysis import hosted_curation
 from basement_analysis.curated_dataset import load_curated_dataset, write_curated_dataset
 from basement_analysis.hosted_curation import (
-    accepted_csv_object_keys,
+    accepted_csv_keys_from_manifest_texts,
     curate_accepted_email_csvs,
     merge_rain_readings,
     merge_weather_hours,
@@ -51,29 +51,40 @@ def weather_hour(raw_timestamp: str, temperature_c: float = 16.0) -> WeatherHour
     )
 
 
+def manifest_json(status: str, attachment_status: str, csv_object_key: str | None) -> str:
+    return json.dumps(
+        {
+            "status": status,
+            "attachments": [{"status": attachment_status, "csv_object_key": csv_object_key}],
+        }
+    )
+
+
 def write_manifest(
     object_store_dir: Path,
+    *,
+    received_date: str,
     name: str,
     status: str,
     attachment_status: str,
     csv_object_key: str | None,
 ) -> None:
-    manifest_path = object_store_dir / "manifests" / "ingest" / f"{name}.json"
+    manifest_path = (
+        object_store_dir
+        / "manifests"
+        / "ingest"
+        / "source=x-sense"
+        / f"received_date={received_date}"
+        / f"{name}.json"
+    )
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(
-        json.dumps(
-            {
-                "status": status,
-                "attachments": [
-                    {
-                        "status": attachment_status,
-                        "csv_object_key": csv_object_key,
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
+        manifest_json(status, attachment_status, csv_object_key), encoding="utf-8"
     )
+
+
+def csv_object_key(export_date: str, sha: str, filename: str) -> str:
+    return f"csv/source=x-sense/export_date={export_date}/attachment_sha256={sha}/{filename}"
 
 
 def write_csv_object(object_store_dir: Path, object_key: str, rows: list[str]) -> None:
@@ -85,6 +96,28 @@ def write_csv_object(object_store_dir: Path, object_key: str, rows: list[str]) -
     )
 
 
+def write_accepted_csv(
+    object_store_dir: Path,
+    *,
+    export_date: str,
+    received_date: str,
+    sha: str,
+    filename: str,
+    rows: list[str],
+) -> None:
+    """Write one accepted CSV object and its accepting ingest manifest, R2-layout faithful."""
+    object_key = csv_object_key(export_date, sha, filename)
+    write_csv_object(object_store_dir, object_key, rows)
+    write_manifest(
+        object_store_dir,
+        received_date=received_date,
+        name=sha,
+        status="accepted",
+        attachment_status="extracted",
+        csv_object_key=object_key,
+    )
+
+
 def write_events_csv(data_dir: Path, rows: list[str]) -> None:
     data_dir.mkdir(parents=True, exist_ok=True)
     (data_dir / "basement_events.csv").write_text(
@@ -93,15 +126,35 @@ def write_events_csv(data_dir: Path, rows: list[str]) -> None:
     )
 
 
-def test_accepted_csv_object_keys_only_uses_extracted_accepted_attachments(
-    tmp_path: Path,
-) -> None:
-    object_store_dir = tmp_path / "objects"
-    write_manifest(object_store_dir, "accepted", "accepted", "extracted", "csv/source=x/a.csv")
-    write_manifest(object_store_dir, "rejected", "rejected", "extracted", "csv/source=x/b.csv")
-    write_manifest(object_store_dir, "invalid_attachment", "accepted", "invalid_csv", None)
+def stub_weather(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the weather/rain fetches deterministic no-ops for sensor-focused tests."""
 
-    assert accepted_csv_object_keys(object_store_dir) == ("csv/source=x/a.csv",)
+    def fake_weather(
+        start_date: date, end_date: date, cache_dir: Path, refresh: bool
+    ) -> list[WeatherHour]:
+        return [weather_hour("2026-07-03T00:00:00")]
+
+    def fake_rainfall(
+        start_date: date, end_date: date, cache_dir: Path, refresh: bool
+    ) -> list[RainReading]:
+        return [RainReading(datetime.fromisoformat("2026-07-03T00:00:00"), 0.0)]
+
+    monkeypatch.setattr(hosted_curation, "fetch_open_meteo_weather", fake_weather)
+    monkeypatch.setattr(hosted_curation, "fetch_environment_agency_rainfall", fake_rainfall)
+
+
+def curated_sensor_rows(dataset_dir: Path) -> list[SensorReading]:
+    return list(load_curated_dataset(dataset_dir).sensor_readings)
+
+
+def test_accepted_csv_keys_from_manifest_texts_only_uses_extracted_accepted_attachments() -> None:
+    manifest_texts = [
+        manifest_json("accepted", "extracted", "csv/source=x/a.csv"),
+        manifest_json("rejected", "extracted", "csv/source=x/b.csv"),
+        manifest_json("accepted", "invalid_csv", None),
+    ]
+
+    assert accepted_csv_keys_from_manifest_texts(manifest_texts) == ("csv/source=x/a.csv",)
 
 
 def test_curate_accepted_email_csvs_merges_existing_parquet_and_staged_csvs(
@@ -137,19 +190,17 @@ def test_curate_accepted_email_csvs_merges_existing_parquet_and_staged_csvs(
     )
 
     object_store_dir = tmp_path / "objects"
-    bedroom_csv_key = (
-        "csv/source=x-sense/export_date=2026-07-04/attachment_sha256=abc123/"
-        "Thermo-hygrometer_2_Export_Data_20260704.csv"
-    )
-    write_csv_object(
+    write_accepted_csv(
         object_store_dir,
-        bedroom_csv_key,
-        [
+        export_date="2026-07-04",
+        received_date="2026-07-04",
+        sha="abc123",
+        filename="Thermo-hygrometer_2_Export_Data_20260704.csv",
+        rows=[
             "2026/07/03 00:01,21.0,55.0",
             "2026/07/04 00:00,20.5,56.0",
         ],
     )
-    write_manifest(object_store_dir, "accepted", "accepted", "extracted", bedroom_csv_key)
 
     def fake_open_meteo_weather(
         start_date: date,
@@ -189,7 +240,7 @@ def test_curate_accepted_email_csvs_merges_existing_parquet_and_staged_csvs(
     )
 
     result = curate_accepted_email_csvs(
-        object_store_dir=object_store_dir,
+        object_store_root=object_store_dir,
         curated_dataset_dir=tmp_path / "curated",
         work_dir=tmp_path / "work",
         events_data_dir=data_dir,
@@ -198,7 +249,9 @@ def test_curate_accepted_email_csvs_merges_existing_parquet_and_staged_csvs(
     )
 
     curated_dataset = load_curated_dataset(tmp_path / "curated")
+    assert result.watermark == datetime.fromisoformat("2026-07-04T00:00:00")
     assert result.accepted_csv_count == 1
+    assert result.selected_csv_count == 1
     assert result.existing_sensor_row_count == 3
     assert result.staged_sensor_row_count == 2
     assert result.merged_sensor_row_count == 5
@@ -244,31 +297,22 @@ def test_curate_refreshes_curated_events_when_a_new_tank_full_line_is_logged(
     )
 
     object_store_dir = tmp_path / "objects"
-    csv_key = "csv/source=x-sense/export_date=2026-07-03/attachment_sha256=abc/basement.csv"
-    write_csv_object(object_store_dir, csv_key, ["2026/07/03 00:01,18.5,67.1"])
-    write_manifest(object_store_dir, "accepted", "accepted", "extracted", csv_key)
-
-    def fake_open_meteo_weather(
-        start_date: date, end_date: date, cache_dir: Path, refresh: bool
-    ) -> list[WeatherHour]:
-        return [weather_hour("2026-07-03T00:00:00")]
-
-    def fake_environment_agency_rainfall(
-        start_date: date, end_date: date, cache_dir: Path, refresh: bool
-    ) -> list[RainReading]:
-        return [RainReading(datetime.fromisoformat("2026-07-03T00:00:00"), 0.0)]
-
-    monkeypatch.setattr(hosted_curation, "fetch_open_meteo_weather", fake_open_meteo_weather)
-    monkeypatch.setattr(
-        hosted_curation, "fetch_environment_agency_rainfall", fake_environment_agency_rainfall
+    write_accepted_csv(
+        object_store_dir,
+        export_date="2026-07-03",
+        received_date="2026-07-03",
+        sha="abc",
+        filename="Thermo-hygrometer_Export_Data_20260703.csv",
+        rows=["2026/07/03 00:01,18.5,67.1"],
     )
+    stub_weather(monkeypatch)
 
     data_dir = tmp_path / "data"
     write_events_csv(data_dir, ["2026/07/05 00:51:03,dehumidifer tank full"])
 
     def curate() -> list[str]:
         curate_accepted_email_csvs(
-            object_store_dir=object_store_dir,
+            object_store_root=object_store_dir,
             curated_dataset_dir=tmp_path / "curated",
             work_dir=tmp_path / "work",
             events_data_dir=data_dir,
@@ -289,6 +333,250 @@ def test_curate_refreshes_curated_events_when_a_new_tank_full_line_is_logged(
         ],
     )
     assert curate() == ["dehumidifer tank full", "dehumidifer tank full"]
+
+
+def build_multi_day_object_store(object_store_dir: Path) -> None:
+    """Five days of accepted Basement CSVs, one export per day, R2-layout faithful."""
+    for day in range(1, 6):
+        export_date = f"2026-07-0{day}"
+        write_accepted_csv(
+            object_store_dir,
+            export_date=export_date,
+            received_date=export_date,
+            sha=f"sha{day}",
+            filename=f"Thermo-hygrometer_Export_Data_2026070{day}.csv",
+            rows=[f"2026/07/0{day} 00:00,18.{day},6{day}.0"],
+        )
+
+
+def test_incremental_run_matches_a_full_rebuild(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub_weather(monkeypatch)
+    object_store_dir = tmp_path / "objects"
+    build_multi_day_object_store(object_store_dir)
+    empty_existing = tmp_path / "empty-existing"
+    empty_existing.mkdir()
+
+    # Full rebuild: cold-start (empty parquet) parses every accepted CSV.
+    curate_accepted_email_csvs(
+        object_store_root=object_store_dir,
+        curated_dataset_dir=tmp_path / "full",
+        work_dir=tmp_path / "work-full",
+        events_data_dir=_events_dir(tmp_path),
+        existing_curated_dataset_root=empty_existing,
+        refresh_weather=False,
+    )
+    full_rows = curated_sensor_rows(tmp_path / "full")
+
+    # Seed a parquet that already covers days 1-4 (itself a cold-start curation over a store that
+    # only has those days), then run incrementally against the full store.
+    partial_store = tmp_path / "partial-objects"
+    for day in range(1, 5):
+        export_date = f"2026-07-0{day}"
+        write_accepted_csv(
+            partial_store,
+            export_date=export_date,
+            received_date=export_date,
+            sha=f"sha{day}",
+            filename=f"Thermo-hygrometer_Export_Data_2026070{day}.csv",
+            rows=[f"2026/07/0{day} 00:00,18.{day},6{day}.0"],
+        )
+    curate_accepted_email_csvs(
+        object_store_root=partial_store,
+        curated_dataset_dir=tmp_path / "seed",
+        work_dir=tmp_path / "work-seed",
+        events_data_dir=_events_dir(tmp_path),
+        existing_curated_dataset_root=empty_existing,
+        refresh_weather=False,
+    )
+
+    result = curate_accepted_email_csvs(
+        object_store_root=object_store_dir,
+        curated_dataset_dir=tmp_path / "incremental",
+        work_dir=tmp_path / "work-incremental",
+        events_data_dir=_events_dir(tmp_path),
+        existing_curated_dataset_root=tmp_path / "seed",
+        refresh_weather=False,
+    )
+    incremental_rows = curated_sensor_rows(tmp_path / "incremental")
+
+    assert result.watermark == datetime.fromisoformat("2026-07-04T00:00:00")
+    # Days 2-5 selected (cutoff = 2026-07-02); day 1 already curated in the seed and skipped.
+    assert result.selected_csv_count == 4
+    assert incremental_rows == full_rows
+
+
+def test_selection_skips_csvs_older_than_the_cutoff(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub_weather(monkeypatch)
+    object_store_dir = tmp_path / "objects"
+    build_multi_day_object_store(object_store_dir)
+
+    existing_dataset_dir = tmp_path / "existing"
+    write_curated_dataset(
+        dataset_dir=existing_dataset_dir,
+        sensor_readings=[sensor_reading("2026-07-04T00:00:00", "Basement", 18.4, 64.0)],
+        events=[],
+        weather_hours=[],
+        rain_readings=[],
+    )
+
+    result = curate_accepted_email_csvs(
+        object_store_root=object_store_dir,
+        curated_dataset_dir=tmp_path / "curated",
+        work_dir=tmp_path / "work",
+        events_data_dir=_events_dir(tmp_path),
+        existing_curated_dataset_root=existing_dataset_dir,
+        refresh_weather=False,
+    )
+
+    # watermark 2026-07-04 → cutoff 2026-07-02 → only days 2,3,4,5 parsed; day 1 skipped.
+    assert result.watermark == datetime.fromisoformat("2026-07-04T00:00:00")
+    assert result.selected_csv_count == 4
+    assert result.accepted_csv_count == 4
+
+
+def test_second_incremental_run_with_no_new_csvs_is_a_no_op(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub_weather(monkeypatch)
+    object_store_dir = tmp_path / "objects"
+    build_multi_day_object_store(object_store_dir)
+    empty_existing = tmp_path / "empty-existing"
+    empty_existing.mkdir()
+
+    curate_accepted_email_csvs(
+        object_store_root=object_store_dir,
+        curated_dataset_dir=tmp_path / "curated",
+        work_dir=tmp_path / "work",
+        events_data_dir=_events_dir(tmp_path),
+        existing_curated_dataset_root=empty_existing,
+        refresh_weather=False,
+    )
+    first_rows = curated_sensor_rows(tmp_path / "curated")
+
+    curate_accepted_email_csvs(
+        object_store_root=object_store_dir,
+        curated_dataset_dir=tmp_path / "curated-2",
+        work_dir=tmp_path / "work-2",
+        events_data_dir=_events_dir(tmp_path),
+        existing_curated_dataset_root=tmp_path / "curated",
+        refresh_weather=False,
+    )
+    second_rows = curated_sensor_rows(tmp_path / "curated-2")
+
+    assert second_rows == first_rows
+
+
+def test_cold_start_empty_parquet_ingests_all_accepted_csvs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub_weather(monkeypatch)
+    object_store_dir = tmp_path / "objects"
+    build_multi_day_object_store(object_store_dir)
+    empty_existing = tmp_path / "empty-existing"
+    empty_existing.mkdir()
+
+    result = curate_accepted_email_csvs(
+        object_store_root=object_store_dir,
+        curated_dataset_dir=tmp_path / "curated",
+        work_dir=tmp_path / "work",
+        events_data_dir=_events_dir(tmp_path),
+        existing_curated_dataset_root=empty_existing,
+        refresh_weather=False,
+    )
+
+    assert result.watermark is None
+    assert result.selected_csv_count == 5
+    assert result.merged_sensor_row_count == 5
+
+
+def test_rebuild_all_parses_every_accepted_csv_despite_a_watermark(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub_weather(monkeypatch)
+    object_store_dir = tmp_path / "objects"
+    build_multi_day_object_store(object_store_dir)
+
+    existing_dataset_dir = tmp_path / "existing"
+    write_curated_dataset(
+        dataset_dir=existing_dataset_dir,
+        sensor_readings=[sensor_reading("2026-07-05T00:00:00", "Basement", 18.5, 65.0)],
+        events=[],
+        weather_hours=[],
+        rain_readings=[],
+    )
+
+    result = curate_accepted_email_csvs(
+        object_store_root=object_store_dir,
+        curated_dataset_dir=tmp_path / "curated",
+        work_dir=tmp_path / "work",
+        events_data_dir=_events_dir(tmp_path),
+        existing_curated_dataset_root=existing_dataset_dir,
+        refresh_weather=False,
+        rebuild_all=True,
+    )
+
+    # A watermark exists (2026-07-05) but --rebuild-all ignores it: all five days re-parsed.
+    assert result.watermark == datetime.fromisoformat("2026-07-05T00:00:00")
+    assert result.accepted_csv_count == 5
+    assert result.selected_csv_count == 5
+
+
+def test_non_accepted_manifest_excludes_its_csv(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub_weather(monkeypatch)
+    object_store_dir = tmp_path / "objects"
+    accepted_key = csv_object_key("2026-07-03", "good", "Thermo-hygrometer_Export_Data.csv")
+    write_csv_object(object_store_dir, accepted_key, ["2026/07/03 00:00,18.0,60.0"])
+    write_manifest(
+        object_store_dir,
+        received_date="2026-07-03",
+        name="good",
+        status="accepted",
+        attachment_status="extracted",
+        csv_object_key=accepted_key,
+    )
+    rejected_key = csv_object_key("2026-07-03", "bad", "Thermo-hygrometer_Export_Data_2.csv")
+    write_csv_object(object_store_dir, rejected_key, ["2026/07/03 00:00,99.0,99.0"])
+    write_manifest(
+        object_store_dir,
+        received_date="2026-07-03",
+        name="bad",
+        status="rejected",
+        attachment_status="extracted",
+        csv_object_key=rejected_key,
+    )
+    empty_existing = tmp_path / "empty-existing"
+    empty_existing.mkdir()
+
+    result = curate_accepted_email_csvs(
+        object_store_root=object_store_dir,
+        curated_dataset_dir=tmp_path / "curated",
+        work_dir=tmp_path / "work",
+        events_data_dir=_events_dir(tmp_path),
+        existing_curated_dataset_root=empty_existing,
+        refresh_weather=False,
+    )
+
+    assert result.accepted_csv_count == 1
+    assert result.merged_sensor_row_count == 1
+
+
+def _events_dir(tmp_path: Path) -> Path:
+    data_dir = tmp_path / "data"
+    if not (data_dir / "basement_events.csv").exists():
+        write_events_csv(data_dir, ["2026/07/01 21:00:00,dehumidifier installed"])
+    return data_dir
 
 
 def test_merge_rain_readings_keeps_old_rows_and_prefers_fresh_on_conflict() -> None:

@@ -2,14 +2,18 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
+import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import cast
 
+import duckdb
+
 from basement_analysis.curated_dataset import (
     CuratedDataRoot,
+    configure_r2_access,
+    join_curated_data_path,
     load_curated_dataset,
     write_curated_dataset,
 )
@@ -18,15 +22,26 @@ from basement_analysis.static_site import (
     fetch_environment_agency_rainfall,
     fetch_open_meteo_weather,
     load_events,
-    load_sensor_readings,
+    sensor_location_for_filename,
+    sensor_readings_from_csv_text,
 )
 from basement_analysis.summaries import RainReading, SensorReading, WeatherHour
+
+# Re-ingest accepted CSVs whose export_date is within this many days *before* the curated
+# watermark. The overlap plus the (location, timestamp) dedup make re-reading the last couple
+# of days idempotent, so a CSV that straddles the boundary or lands a little late is never
+# dropped. This is the one tunable.
+OVERLAP_DAYS = 2
+
+MANIFEST_GLOB = "manifests/ingest/**/*.json"
 
 
 @dataclass(frozen=True)
 class HostedCurationResult:
     curated_dataset_dir: Path
     accepted_csv_count: int
+    selected_csv_count: int
+    watermark: datetime | None
     existing_sensor_row_count: int
     staged_sensor_row_count: int
     merged_sensor_row_count: int
@@ -44,62 +59,161 @@ def default_existing_curated_dataset_root() -> str:
     return f"s3://{bucket_name}/parquet"
 
 
-def accepted_csv_object_keys(object_store_dir: Path) -> tuple[str, ...]:
+def sensor_reading_watermark(
+    sensor_readings: tuple[SensorReading, ...],
+) -> datetime | None:
+    """The newest reading already in the curated parquet, or None if it is empty (cold start)."""
+    if not sensor_readings:
+        return None
+    return max(reading.timestamp for reading in sensor_readings)
+
+
+def object_store_connection(object_store_root: CuratedDataRoot) -> duckdb.DuckDBPyConnection:
+    """A DuckDB connection that reads the object store — R2 (s3://) or a local dir — directly."""
+    connection = duckdb.connect(database=":memory:")
+    if isinstance(object_store_root, str):
+        configure_r2_access(connection)
+    return connection
+
+
+def list_object_paths(
+    connection: duckdb.DuckDBPyConnection, object_store_root: CuratedDataRoot, pattern: str
+) -> list[str]:
+    glob_pattern = str(join_curated_data_path(object_store_root, pattern))
+    rows = connection.execute("select file from glob($1) order by file", [glob_pattern]).fetchall()
+    return [cast(str, row[0]) for row in rows]
+
+
+def read_object_texts(
+    connection: duckdb.DuckDBPyConnection, object_paths: list[str]
+) -> list[tuple[str, str]]:
+    """Return (path, text) for each object, read directly from the store (no local mirror)."""
+    if not object_paths:
+        return []
+    rows = connection.execute(
+        "select filename, content from read_text($1) order by filename", [object_paths]
+    ).fetchall()
+    return [(cast(str, filename), cast(str, content)) for filename, content in rows]
+
+
+def partition_date_from_key(object_key: str, field: str) -> date | None:
+    match = re.search(rf"{field}=(\d{{4}}-\d{{2}}-\d{{2}})", object_key)
+    if match is None:
+        return None
+    try:
+        return date.fromisoformat(match.group(1))
+    except ValueError:
+        return None
+
+
+def accepted_csv_keys_from_manifest(manifest: dict[str, object]) -> list[str]:
+    if manifest.get("status") != "accepted":
+        return []
+    attachments = manifest.get("attachments")
+    if not isinstance(attachments, list):
+        return []
+    keys: list[str] = []
+    for attachment in cast(list[object], attachments):
+        if not isinstance(attachment, dict):
+            continue
+        attachment_values = cast(dict[object, object], attachment)
+        if attachment_values.get("status") != "extracted":
+            continue
+        csv_object_key = attachment_values.get("csv_object_key")
+        if isinstance(csv_object_key, str) and csv_object_key:
+            keys.append(csv_object_key)
+    return keys
+
+
+def accepted_csv_keys_from_manifest_texts(manifest_texts: list[str]) -> tuple[str, ...]:
     object_keys: set[str] = set()
-    manifest_root = object_store_dir / "manifests" / "ingest"
-    for manifest_path in sorted(manifest_root.glob("**/*.json")):
-        manifest = cast(dict[str, object], json.loads(manifest_path.read_text(encoding="utf-8")))
-        if manifest.get("status") != "accepted":
-            continue
-        attachments = manifest.get("attachments")
-        if not isinstance(attachments, list):
-            continue
-        for attachment in cast(list[object], attachments):
-            if not isinstance(attachment, dict):
-                continue
-            attachment_values = cast(dict[object, object], attachment)
-            if attachment_values.get("status") != "extracted":
-                continue
-            csv_object_key = attachment_values.get("csv_object_key")
-            if isinstance(csv_object_key, str) and csv_object_key:
-                object_keys.add(csv_object_key)
+    for text in manifest_texts:
+        manifest = cast(dict[str, object], json.loads(text))
+        object_keys.update(accepted_csv_keys_from_manifest(manifest))
     return tuple(sorted(object_keys))
 
 
-def stage_accepted_csv_objects(
-    object_store_dir: Path, staged_data_dir: Path, csv_object_keys: tuple[str, ...]
-) -> tuple[Path, ...]:
-    if staged_data_dir.exists():
-        shutil.rmtree(staged_data_dir)
-    staged_data_dir.mkdir(parents=True, exist_ok=True)
+def accepted_csv_object_keys(
+    connection: duckdb.DuckDBPyConnection,
+    object_store_root: CuratedDataRoot,
+    cutoff_date: date | None,
+) -> tuple[str, ...]:
+    """Accepted CSV object keys per the ingest manifests, reading only the recent manifests.
 
-    staged_paths: list[Path] = []
-    for object_key in csv_object_keys:
-        source_path = object_store_dir / object_key
-        if not source_path.exists():
-            raise FileNotFoundError(
-                f"Accepted ingest manifest references missing CSV object {object_key!r}"
-            )
-        destination_path = staged_data_dir / object_key
-        destination_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source_path, destination_path)
-        staged_paths.append(destination_path)
-    return tuple(staged_paths)
+    For an incremental run (`cutoff_date` set) only manifests whose `received_date` partition is
+    at or after the cutoff need reading — received_date tracks export_date within a day, so no
+    manifest referencing an in-window CSV is skipped. A `None` cutoff reads every manifest.
+    """
+    manifest_paths = list_object_paths(connection, object_store_root, MANIFEST_GLOB)
+    selected_manifest_paths = [
+        path
+        for path in manifest_paths
+        if cutoff_date is None or _received_within_cutoff(path, cutoff_date)
+    ]
+    manifest_texts = [text for _, text in read_object_texts(connection, selected_manifest_paths)]
+    return accepted_csv_keys_from_manifest_texts(manifest_texts)
+
+
+def _received_within_cutoff(manifest_path: str, cutoff_date: date) -> bool:
+    received_date = partition_date_from_key(manifest_path, "received_date")
+    return received_date is None or received_date >= cutoff_date
+
+
+def select_csv_keys_by_export_date(
+    accepted_csv_keys: tuple[str, ...], cutoff_date: date | None
+) -> tuple[str, ...]:
+    """Keep only CSVs whose export_date is at or after the cutoff; older ones are already curated.
+
+    A key whose export_date cannot be parsed is kept (never silently dropped). `None` keeps all.
+    """
+    if cutoff_date is None:
+        return accepted_csv_keys
+    selected: list[str] = []
+    for object_key in accepted_csv_keys:
+        export_date = partition_date_from_key(object_key, "export_date")
+        if export_date is None or export_date >= cutoff_date:
+            selected.append(object_key)
+    return tuple(selected)
+
+
+def parse_selected_csv_objects(
+    connection: duckdb.DuckDBPyConnection,
+    object_store_root: CuratedDataRoot,
+    selected_csv_keys: tuple[str, ...],
+) -> list[SensorReading]:
+    csv_paths = [str(join_curated_data_path(object_store_root, key)) for key in selected_csv_keys]
+    readings: list[SensorReading] = []
+    for filename, content in read_object_texts(connection, csv_paths):
+        location = sensor_location_for_filename(Path(filename).name)
+        readings.extend(sensor_readings_from_csv_text(content, location))
+    return readings
 
 
 def curate_accepted_email_csvs(
-    object_store_dir: Path,
+    object_store_root: CuratedDataRoot,
     curated_dataset_dir: Path,
     work_dir: Path,
     events_data_dir: Path = Path("data"),
     existing_curated_dataset_root: CuratedDataRoot | None = None,
     refresh_weather: bool = True,
+    rebuild_all: bool = False,
     phase_recorder: PhaseRecorder | None = None,
 ) -> HostedCurationResult:
     recorder = phase_recorder if phase_recorder is not None else PhaseRecorder()
     existing_root = existing_curated_dataset_root or default_existing_curated_dataset_root()
     with recorder.phase("load-existing-curated-parquet"):
         existing_dataset = load_curated_dataset(existing_root)
+
+    # The curated parquet is the full merged history; its newest reading is the watermark. Only
+    # CSVs at or after `watermark - OVERLAP_DAYS` can carry anything not already curated, so those
+    # are the only ones downloaded and parsed. `--rebuild-all` (or a cold-start empty parquet)
+    # drops the cutoff and re-parses every accepted CSV.
+    watermark = sensor_reading_watermark(existing_dataset.sensor_readings)
+    cutoff_date = (
+        None
+        if (rebuild_all or watermark is None)
+        else watermark.date() - timedelta(days=OVERLAP_DAYS)
+    )
 
     # Events are owner-logged in the checked-out repo's basement_events.csv, which is the full
     # authoritative history; the curated `events` dataset in R2 was a stale seed that never
@@ -109,21 +223,25 @@ def curate_accepted_email_csvs(
     with recorder.phase("load-manual-events"):
         events = load_events(events_data_dir)
 
-    with recorder.phase("stage-accepted-csvs"):
-        csv_object_keys = accepted_csv_object_keys(object_store_dir)
-        staged_data_dir = work_dir / "accepted-csvs"
-        stage_accepted_csv_objects(object_store_dir, staged_data_dir, csv_object_keys)
-    with recorder.phase("load-staged-sensor-csvs"):
-        staged_sensor_readings = load_sensor_readings(staged_data_dir)
+    with recorder.phase("select-and-parse-accepted-csvs"):
+        connection = object_store_connection(object_store_root)
+        try:
+            accepted_csv_keys = accepted_csv_object_keys(connection, object_store_root, cutoff_date)
+            selected_csv_keys = select_csv_keys_by_export_date(accepted_csv_keys, cutoff_date)
+            new_sensor_readings = parse_selected_csv_objects(
+                connection, object_store_root, selected_csv_keys
+            )
+        finally:
+            connection.close()
 
     with recorder.phase("merge-sensor-readings"):
         merged_sensor_readings = merge_sensor_readings(
-            [*existing_dataset.sensor_readings, *staged_sensor_readings]
+            [*existing_dataset.sensor_readings, *new_sensor_readings]
         )
     if not merged_sensor_readings:
         raise ValueError(
             f"No sensor readings found in existing dataset {existing_root!r} or accepted CSVs "
-            f"under {object_store_dir}"
+            f"under {object_store_root}"
         )
 
     dataset_start = min(reading.timestamp for reading in merged_sensor_readings)
@@ -157,9 +275,11 @@ def curate_accepted_email_csvs(
         )
     return HostedCurationResult(
         curated_dataset_dir=curated_dataset_dir,
-        accepted_csv_count=len(csv_object_keys),
+        accepted_csv_count=len(accepted_csv_keys),
+        selected_csv_count=len(selected_csv_keys),
+        watermark=watermark,
         existing_sensor_row_count=len(existing_dataset.sensor_readings),
-        staged_sensor_row_count=len(staged_sensor_readings),
+        staged_sensor_row_count=len(new_sensor_readings),
         merged_sensor_row_count=len(merged_sensor_readings),
         event_count=len(events),
         weather_hour_count=len(weather_hours),
