@@ -1,6 +1,6 @@
 # R2 object layout follow-on
 
-Status: proposed; the event Parquet partition cleanup is implemented separately.
+Status: implemented and verified in production on 2026-08-22.
 
 ## Live inventory before cleanup on 2026-08-22
 
