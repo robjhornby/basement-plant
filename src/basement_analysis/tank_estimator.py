@@ -28,6 +28,8 @@ from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
+from basement_analysis.timezones import london_wall_clock_to_utc, utc_to_london_wall_clock
+
 
 class BasementReading(Protocol):
     """The slice of a sensor reading the tank estimator consumes."""
@@ -45,7 +47,9 @@ class BasementReading(Protocol):
     def absolute_humidity_g_m3(self) -> float: ...
 
 
-DEHUMIDIFIER_INSTALLED_AT = datetime(2026, 7, 1, 21, 0)
+# A canonical UTC instant (2026-07-01 21:00 Europe/London), so it compares directly against the
+# UTC-instant reading timestamps. Ticket 05 will derive this from the logged install event.
+DEHUMIDIFIER_INSTALLED_AT = london_wall_clock_to_utc(datetime(2026, 7, 1, 21, 0))
 TANK_CAPACITY_LITRES = 25
 
 SMOOTHING_WINDOW_MINUTES = 9
@@ -366,7 +370,9 @@ def uncertainty_words(uncertainty_days: float) -> str:
 
 
 def format_footer_datetime(timestamp: datetime) -> str:
-    return f"{timestamp:%a} {timestamp.day} {timestamp:%b} {timestamp:%H:%M}"
+    # Presentation boundary: render the canonical UTC instant in local wall-clock time.
+    local = utc_to_london_wall_clock(timestamp)
+    return f"{local:%a} {local.day} {local:%b} {local:%H:%M}"
 
 
 def footer_text(

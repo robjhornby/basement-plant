@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
@@ -23,6 +23,11 @@ from basement_analysis.summaries import (
 )
 
 
+def _utc(raw_timestamp: str) -> datetime:
+    """Canonical UTC instant from an ISO string — curated timestamps round-trip as UTC-aware."""
+    return datetime.fromisoformat(raw_timestamp).replace(tzinfo=UTC)
+
+
 def sensor_reading(
     raw_timestamp: str,
     location: str,
@@ -30,7 +35,7 @@ def sensor_reading(
     relative_humidity_pct: float,
 ) -> SensorReading:
     return SensorReading(
-        timestamp=datetime.fromisoformat(raw_timestamp),
+        timestamp=_utc(raw_timestamp),
         location=location,
         temperature_c=temperature_c,
         relative_humidity_pct=relative_humidity_pct,
@@ -41,7 +46,7 @@ def sensor_reading(
 def weather_hour(raw_timestamp: str, temperature_c: float = 16.0) -> WeatherHour:
     relative_humidity_pct = 70.0
     return WeatherHour(
-        timestamp=datetime.fromisoformat(raw_timestamp),
+        timestamp=_utc(raw_timestamp),
         temperature_c=temperature_c,
         relative_humidity_pct=relative_humidity_pct,
         dew_point_c=10.0,
@@ -138,7 +143,7 @@ def stub_weather(monkeypatch: pytest.MonkeyPatch) -> None:
         start_date: date, end_date: date, cache_dir: Path, refresh: bool
     ) -> list[RainReading]:
         return [
-            RainReading(timestamp=datetime.fromisoformat("2026-07-03T00:00:00"), rainfall_mm=0.0)
+            RainReading(timestamp=_utc("2026-07-03T00:00:00"), rainfall_mm=0.0)
         ]
 
     monkeypatch.setattr(hosted_curation, "fetch_open_meteo_weather", fake_weather)
@@ -169,8 +174,8 @@ def test_weather_and_rain_fetch_from_their_own_recent_watermark(
             weather_hour("2026-08-06T00:00:00"),
         ],
         rain_readings=[
-            RainReading(timestamp=datetime.fromisoformat("2026-01-01T00:00:00"), rainfall_mm=1.5),
-            RainReading(timestamp=datetime.fromisoformat("2026-08-07T00:00:00"), rainfall_mm=0.0),
+            RainReading(timestamp=_utc("2026-01-01T00:00:00"), rainfall_mm=1.5),
+            RainReading(timestamp=_utc("2026-08-07T00:00:00"), rainfall_mm=0.0),
         ],
     )
 
@@ -239,7 +244,7 @@ def test_curate_accepted_email_csvs_merges_existing_parquet_and_staged_csvs(
         ],
         events=[
             Event(
-                timestamp=datetime.fromisoformat("2026-07-02T21:00:00"),
+                timestamp=_utc("2026-07-02T21:00:00"),
                 description="Dehumidifier on",
             )
         ],
@@ -248,8 +253,8 @@ def test_curate_accepted_email_csvs_merges_existing_parquet_and_staged_csvs(
             weather_hour("2026-07-03T00:00:00", temperature_c=16.0),
         ],
         rain_readings=[
-            RainReading(timestamp=datetime.fromisoformat("2026-06-01T00:00:00"), rainfall_mm=1.5),
-            RainReading(timestamp=datetime.fromisoformat("2026-07-03T00:00:00"), rainfall_mm=0.0),
+            RainReading(timestamp=_utc("2026-06-01T00:00:00"), rainfall_mm=1.5),
+            RainReading(timestamp=_utc("2026-07-03T00:00:00"), rainfall_mm=0.0),
         ],
     )
 
@@ -281,7 +286,9 @@ def test_curate_accepted_email_csvs_merges_existing_parquet_and_staged_csvs(
         cache_dir: Path,
         refresh: bool,
     ) -> list[WeatherHour]:
-        assert start_date == date(2026, 7, 3)
+        # The staged CSV rows are Europe/London wall-clock; "2026/07/03 00:01" is 2026-07-02
+        # 23:01 UTC, so the merged UTC dataset now starts on 2026-07-02.
+        assert start_date == date(2026, 7, 2)
         assert end_date == date(2026, 7, 4)
         assert cache_dir == tmp_path / "work" / "cache"
         assert refresh
@@ -296,13 +303,13 @@ def test_curate_accepted_email_csvs_merges_existing_parquet_and_staged_csvs(
         cache_dir: Path,
         refresh: bool,
     ) -> list[RainReading]:
-        assert start_date == date(2026, 7, 3)
+        assert start_date == date(2026, 7, 2)
         assert end_date == date(2026, 7, 4)
         assert cache_dir == tmp_path / "work" / "cache"
         assert refresh
         return [
-            RainReading(timestamp=datetime.fromisoformat("2026-07-03T00:00:00"), rainfall_mm=0.4),
-            RainReading(timestamp=datetime.fromisoformat("2026-07-04T00:00:00"), rainfall_mm=0.2),
+            RainReading(timestamp=_utc("2026-07-03T00:00:00"), rainfall_mm=0.4),
+            RainReading(timestamp=_utc("2026-07-04T00:00:00"), rainfall_mm=0.2),
         ]
 
     monkeypatch.setattr(hosted_curation, "fetch_open_meteo_weather", fake_open_meteo_weather)
@@ -322,7 +329,7 @@ def test_curate_accepted_email_csvs_merges_existing_parquet_and_staged_csvs(
     )
 
     curated_dataset = load_curated_dataset(tmp_path / "curated")
-    assert result.watermark == datetime.fromisoformat("2026-07-04T00:00:00")
+    assert result.watermark == _utc("2026-07-04T00:00:00")
     assert result.accepted_csv_count == 1
     assert result.selected_csv_count == 1
     assert result.existing_sensor_row_count == 3
@@ -342,17 +349,17 @@ def test_curate_accepted_email_csvs_merges_existing_parquet_and_staged_csvs(
     }
     weather_by_timestamp = {hour.timestamp: hour for hour in curated_dataset.weather_hours}
     assert sorted(weather_by_timestamp) == [
-        datetime.fromisoformat("2026-06-01T00:00:00"),
-        datetime.fromisoformat("2026-07-03T00:00:00"),
-        datetime.fromisoformat("2026-07-04T00:00:00"),
+        _utc("2026-06-01T00:00:00"),
+        _utc("2026-07-03T00:00:00"),
+        _utc("2026-07-04T00:00:00"),
     ]
-    assert weather_by_timestamp[datetime.fromisoformat("2026-07-03T00:00:00")].temperature_c == 17.5
+    assert weather_by_timestamp[_utc("2026-07-03T00:00:00")].temperature_c == 17.5
     assert [
         (reading.timestamp, reading.rainfall_mm) for reading in curated_dataset.rain_readings
     ] == [
-        (datetime.fromisoformat("2026-06-01T00:00:00"), 1.5),
-        (datetime.fromisoformat("2026-07-03T00:00:00"), 0.4),
-        (datetime.fromisoformat("2026-07-04T00:00:00"), 0.2),
+        (_utc("2026-06-01T00:00:00"), 1.5),
+        (_utc("2026-07-03T00:00:00"), 0.4),
+        (_utc("2026-07-04T00:00:00"), 0.2),
     ]
 
 
@@ -366,13 +373,13 @@ def test_curate_refreshes_curated_events_when_a_new_tank_full_line_is_logged(
         sensor_readings=[sensor_reading("2026-07-03T00:00:00", "Basement", 18.5, 67.2)],
         events=[
             Event(
-                timestamp=datetime.fromisoformat("2026-07-02T21:00:00"),
+                timestamp=_utc("2026-07-02T21:00:00"),
                 description="stale seed event",
             )
         ],
         weather_hours=[weather_hour("2026-07-03T00:00:00")],
         rain_readings=[
-            RainReading(timestamp=datetime.fromisoformat("2026-07-03T00:00:00"), rainfall_mm=0.0)
+            RainReading(timestamp=_utc("2026-07-03T00:00:00"), rainfall_mm=0.0)
         ],
     )
 
@@ -482,9 +489,11 @@ def test_incremental_run_matches_a_full_rebuild(
     )
     incremental_rows = curated_sensor_rows(tmp_path / "incremental")
 
-    assert result.watermark == datetime.fromisoformat("2026-07-04T00:00:00")
-    # Days 2-5 selected (cutoff = 2026-07-02); day 1 already curated in the seed and skipped.
-    assert result.selected_csv_count == 4
+    # The seed's newest CSV row "2026/07/04 00:00" (Europe/London) is 2026-07-03 23:00 UTC.
+    assert result.watermark == _utc("2026-07-03T23:00:00")
+    # cutoff = watermark.date()(2026-07-03) - OVERLAP_DAYS(2) = 2026-07-01, so all five days are
+    # re-parsed (day 1 too, idempotently); the merge/dedup still matches a full rebuild.
+    assert result.selected_csv_count == 5
     assert incremental_rows == full_rows
 
 
@@ -515,7 +524,7 @@ def test_selection_skips_csvs_older_than_the_cutoff(
     )
 
     # watermark 2026-07-04 → cutoff 2026-07-02 → only days 2,3,4,5 parsed; day 1 skipped.
-    assert result.watermark == datetime.fromisoformat("2026-07-04T00:00:00")
+    assert result.watermark == _utc("2026-07-04T00:00:00")
     assert result.selected_csv_count == 4
     assert result.accepted_csv_count == 4
 
@@ -605,7 +614,7 @@ def test_rebuild_all_parses_every_accepted_csv_despite_a_watermark(
     )
 
     # A watermark exists (2026-07-05) but --rebuild-all ignores it: all five days re-parsed.
-    assert result.watermark == datetime.fromisoformat("2026-07-05T00:00:00")
+    assert result.watermark == _utc("2026-07-05T00:00:00")
     assert result.accepted_csv_count == 5
     assert result.selected_csv_count == 5
 
@@ -661,20 +670,20 @@ def _events_dir(tmp_path: Path) -> Path:
 
 def test_merge_rain_readings_keeps_old_rows_and_prefers_fresh_on_conflict() -> None:
     existing = [
-        RainReading(timestamp=datetime.fromisoformat("2026-06-01T00:00:00"), rainfall_mm=1.5),
-        RainReading(timestamp=datetime.fromisoformat("2026-07-03T00:00:00"), rainfall_mm=0.0),
+        RainReading(timestamp=_utc("2026-06-01T00:00:00"), rainfall_mm=1.5),
+        RainReading(timestamp=_utc("2026-07-03T00:00:00"), rainfall_mm=0.0),
     ]
     fresh = [
-        RainReading(timestamp=datetime.fromisoformat("2026-07-03T00:00:00"), rainfall_mm=0.4),
-        RainReading(timestamp=datetime.fromisoformat("2026-07-04T00:00:00"), rainfall_mm=0.2),
+        RainReading(timestamp=_utc("2026-07-03T00:00:00"), rainfall_mm=0.4),
+        RainReading(timestamp=_utc("2026-07-04T00:00:00"), rainfall_mm=0.2),
     ]
 
     merged = merge_rain_readings([*existing, *fresh])
 
     assert merged == [
-        RainReading(timestamp=datetime.fromisoformat("2026-06-01T00:00:00"), rainfall_mm=1.5),
-        RainReading(timestamp=datetime.fromisoformat("2026-07-03T00:00:00"), rainfall_mm=0.4),
-        RainReading(timestamp=datetime.fromisoformat("2026-07-04T00:00:00"), rainfall_mm=0.2),
+        RainReading(timestamp=_utc("2026-06-01T00:00:00"), rainfall_mm=1.5),
+        RainReading(timestamp=_utc("2026-07-03T00:00:00"), rainfall_mm=0.4),
+        RainReading(timestamp=_utc("2026-07-04T00:00:00"), rainfall_mm=0.2),
     ]
 
 
@@ -691,7 +700,7 @@ def test_merge_weather_hours_keeps_old_rows_and_prefers_fresh_on_conflict() -> N
     merged = merge_weather_hours([*existing, *fresh])
 
     assert [(hour.timestamp, hour.temperature_c) for hour in merged] == [
-        (datetime.fromisoformat("2026-06-01T00:00:00"), 16.0),
-        (datetime.fromisoformat("2026-07-03T00:00:00"), 17.5),
-        (datetime.fromisoformat("2026-07-04T00:00:00"), 16.0),
+        (_utc("2026-06-01T00:00:00"), 16.0),
+        (_utc("2026-07-03T00:00:00"), 17.5),
+        (_utc("2026-07-04T00:00:00"), 16.0),
     ]

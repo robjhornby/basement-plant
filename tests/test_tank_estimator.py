@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from basement_analysis.summaries import SensorReading
 from basement_analysis.tank_estimator import (
@@ -61,8 +61,9 @@ def test_single_complete_episode_yields_events_totals_and_prediction_footer() ->
     assert result.completed_fill_count == 1
     assert result.litres_removed == 25
     assert result.state == "predicted_next_full"
-    # Anchor: emptied 2026-07-04 09:20 + mean fill duration of exactly 2 days.
-    assert result.next_full_estimate == datetime(2026, 7, 6, 9, 20)
+    # Anchor: emptied 2026-07-04 09:20 local (BST) + mean fill duration of exactly 2 days, as a
+    # canonical UTC instant (09:20 BST == 08:20 UTC).
+    assert result.next_full_estimate == datetime(2026, 7, 6, 8, 20, tzinfo=UTC)
     assert result.footer_text == (
         "The dehumidifier has filled 1 times so far, removing 25 litres of water. "
         "Dehumidifier tank predicted next full Mon 6 Jul 09:20 ± half a day."

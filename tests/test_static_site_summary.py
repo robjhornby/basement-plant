@@ -3,7 +3,7 @@ from __future__ import annotations
 import io
 import json
 import re
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from email.message import Message
 from pathlib import Path
 from typing import cast
@@ -12,6 +12,7 @@ from urllib.error import HTTPError, URLError
 import pytest
 
 from basement_analysis.static_site import (
+    chart_timestamp_seconds,
     fetch_json_from_url,
     fetch_open_meteo_weather,
     load_events,
@@ -31,6 +32,7 @@ from basement_analysis.summaries import (
     absolute_humidity_g_m3,
     build_site_analysis_summary,
 )
+from basement_analysis.timezones import london_wall_clock_to_utc
 from synthetic_tank_series import minutes_after_install, synthetic_series
 
 
@@ -65,9 +67,11 @@ def test_load_events_reads_seconds_precision_tank_full_rows(tmp_path: Path) -> N
 
     events = load_events(tmp_path)
 
+    # Timestamps are stored as canonical UTC instants: the naive Europe/London wall-clock
+    # values (BST, +01:00 in July) shift back an hour.
     assert [(event.timestamp, event.description) for event in events] == [
-        (datetime(2026, 7, 1, 21, 0), "dehumidifier installed"),
-        (datetime(2026, 7, 5, 0, 51, 3), "dehumidifer tank full"),
+        (datetime(2026, 7, 1, 20, 0, tzinfo=UTC), "dehumidifier installed"),
+        (datetime(2026, 7, 4, 23, 51, 3, tzinfo=UTC), "dehumidifer tank full"),
     ]
 
 
@@ -135,8 +139,9 @@ def test_fetch_open_meteo_weather_drops_hours_with_null_values(tmp_path: Path) -
         refresh=False,
     )
 
+    # Open-Meteo hours are naive Europe/London wall-clock; stored as the UTC instant (BST -1h).
     assert [hour.timestamp for hour in weather_hours] == [
-        datetime.fromisoformat("2026-07-03T00:00:00")
+        datetime(2026, 7, 2, 23, 0, tzinfo=UTC)
     ]
     assert weather_hours[0].temperature_c == 16.0
 
@@ -286,6 +291,41 @@ def test_site_analysis_summary_builds_shared_dashboard_and_report_values() -> No
         "Relative humidity",
     ]
     assert "event timestamp uncertainty" in summary.period_summaries[-1].comparability_flags
+
+
+def test_utc_readings_render_the_same_local_wall_clock_as_naive_local() -> None:
+    # Round-trip invariant: ingestion shifts a Europe/London sensor reading to UTC (BST -1h),
+    # presentation shifts it back, so the published local time is identical to the pre-UTC
+    # pipeline. A 2026-07-02 23:00 local reading is stored 22:00Z and must still render "23:00".
+    local_naive = datetime(2026, 7, 2, 23, 0)
+    utc_instant = london_wall_clock_to_utc(local_naive)
+    assert utc_instant == datetime(2026, 7, 2, 22, 0, tzinfo=UTC)
+
+    def summary_for(timestamp: datetime) -> SiteAnalysisSummary:
+        return build_site_analysis_summary(
+            sensor_readings=[
+                SensorReading(
+                    timestamp=timestamp,
+                    location="Basement",
+                    temperature_c=19.0,
+                    relative_humidity_pct=71.0,
+                    absolute_humidity_g_m3=absolute_humidity_g_m3(19.0, 71.0),
+                )
+            ],
+            events=[],
+            weather_hours=[],
+            rain_readings=[],
+            generated_at=datetime.fromisoformat("2026-07-05T12:00:00"),
+        )
+
+    utc_html = render_index_html(summary_for(utc_instant))
+    naive_html = render_index_html(summary_for(local_naive))
+
+    # Both the canonical-UTC build and a legacy naive-local build publish the same local time.
+    assert "Data to 02 Jul 2026, 23:00" in utc_html
+    assert "Data to 02 Jul 2026, 23:00" in naive_html
+    # The chart x-axis (absolute epoch seconds) is identical for the instant and its local value.
+    assert chart_timestamp_seconds(utc_instant) == chart_timestamp_seconds(local_naive)
 
 
 def test_dashboard_chart_payload_matches_final_redesign_lineup() -> None:
@@ -699,10 +739,16 @@ def summary_from_tank_series(
         Event(timestamp=minutes_after_install(minute), description="dehumidifer tank full")
         for minute in tank_full_minutes
     ]
+    # synthetic_series builds readings off the canonical UTC install instant, so weather must be
+    # on the same UTC timeline for the period joins to line up.
+    naive_weather = weather_hour("2026-07-02T22:00:00", 17.0, 68.0)
+    utc_weather = naive_weather.model_copy(
+        update={"timestamp": naive_weather.timestamp.replace(tzinfo=UTC)}
+    )
     return build_site_analysis_summary(
         sensor_readings=synthetic_series(segments),
         events=tank_full_events,
-        weather_hours=[weather_hour("2026-07-02T22:00:00", 17.0, 68.0)],
+        weather_hours=[utc_weather],
         rain_readings=[],
         generated_at=datetime.fromisoformat("2026-07-10T12:00:00"),
     )

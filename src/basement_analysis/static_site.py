@@ -16,7 +16,6 @@ from typing import cast
 from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import urlopen
-from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict
 
@@ -40,6 +39,12 @@ from basement_analysis.summaries import (
     WeatherHour,
     absolute_humidity_g_m3,
     build_site_analysis_summary,
+)
+from basement_analysis.timezones import (
+    LONDON,
+    UTC,
+    london_wall_clock_to_utc,
+    utc_to_london_wall_clock,
 )
 
 CAVERSHAM_LATITUDE = 51.47
@@ -97,8 +102,10 @@ class BuildResult(BaseModel):
 
 
 def parse_local_datetime(raw_value: str) -> datetime:
-    # Sensor exports use minute precision; owner-logged events (basement_events.csv) mix minute
-    # precision with seconds-precision tank-full timestamps, so accept both.
+    # Parses the string into a *naive* Europe/London wall-clock datetime; callers convert to a
+    # UTC instant via `london_wall_clock_to_utc` at the ingestion boundary. Sensor exports use
+    # minute precision; owner-logged events (basement_events.csv) mix minute precision with
+    # seconds-precision tank-full timestamps, so accept both.
     for datetime_format in ("%Y/%m/%d %H:%M:%S", "%Y/%m/%d %H:%M"):
         try:
             return datetime.strptime(raw_value, datetime_format)
@@ -108,7 +115,8 @@ def parse_local_datetime(raw_value: str) -> datetime:
 
 
 def format_timestamp(timestamp: datetime) -> str:
-    return timestamp.strftime("%Y-%m-%d %H:%M")
+    # Presentation boundary: canonical timestamps are UTC instants, rendered here in local time.
+    return utc_to_london_wall_clock(timestamp).strftime("%Y-%m-%d %H:%M")
 
 
 def format_optional_float(value: float | None, digits: int = 2) -> str:
@@ -149,11 +157,11 @@ def render_json_script(script_id: str, payload: Mapping[str, JsonValue]) -> str:
 
 
 def chart_timestamp_seconds(timestamp: datetime) -> int:
-    local_zone = ZoneInfo(LOCAL_TIMEZONE)
+    # Presentation boundary: the chart x-axis is epoch seconds (an absolute instant). A canonical
+    # UTC-aware timestamp yields the correct epoch directly; a naive legacy value is interpreted
+    # as Europe/London wall-clock so the same absolute instant is produced either way.
     aware_timestamp = (
-        timestamp.replace(tzinfo=local_zone)
-        if timestamp.tzinfo is None
-        else timestamp.astimezone(local_zone)
+        timestamp.replace(tzinfo=LONDON) if timestamp.tzinfo is None else timestamp
     )
     return round(aware_timestamp.timestamp())
 
@@ -179,7 +187,8 @@ def sensor_readings_from_csv_text(csv_text: str, location: str) -> list[SensorRe
     readings: list[SensorReading] = []
     reader = csv.DictReader(io.StringIO(csv_text.lstrip("\ufeff")))
     for row in reader:
-        timestamp = parse_local_datetime(required_csv_value(row, "Time"))
+        # X-Sense CSV timestamps are naive Europe/London wall-clock; store the UTC instant.
+        timestamp = london_wall_clock_to_utc(parse_local_datetime(required_csv_value(row, "Time")))
         temperature_c = float(required_csv_value(row, "Temperature_Celsius"))
         relative_humidity_pct = float(required_csv_value(row, "Relative Humidity_Percent"))
         readings.append(
@@ -225,7 +234,10 @@ def load_events(data_dir: Path) -> list[Event]:
         for row in reader:
             events.append(
                 Event(
-                    timestamp=parse_local_datetime(required_csv_value(row, "Time")),
+                    # Owner-logged event times are naive Europe/London wall-clock; store as UTC.
+                    timestamp=london_wall_clock_to_utc(
+                        parse_local_datetime(required_csv_value(row, "Time"))
+                    ),
                     description=required_csv_value(row, "Event"),
                 )
             )
@@ -322,7 +334,9 @@ def fetch_open_meteo_weather(
             continue
         weather_hours.append(
             WeatherHour(
-                timestamp=datetime.fromisoformat(raw_time),
+                # Open-Meteo is queried with timezone=Europe/London, so it returns naive local
+                # wall-clock hours; store the corresponding UTC instant.
+                timestamp=london_wall_clock_to_utc(datetime.fromisoformat(raw_time)),
                 temperature_c=temperature_c,
                 relative_humidity_pct=relative_humidity_pct,
                 dew_point_c=dew_point_c,
@@ -369,16 +383,18 @@ def fetch_environment_agency_rainfall(
     )
     payload = fetch_json(cache_path, url, refresh)
     raw_items = cast(Sequence[dict[str, object]], payload.get("items", []))
-    local_zone = ZoneInfo(LOCAL_TIMEZONE)
     readings: list[RainReading] = []
     for item in raw_items:
         raw_timestamp = item.get("dateTime")
         raw_value = item.get("value")
         if not isinstance(raw_timestamp, str) or not isinstance(raw_value, int | float):
             continue
-        aware_timestamp = datetime.fromisoformat(raw_timestamp.replace("Z", "+00:00"))
-        local_timestamp = aware_timestamp.astimezone(local_zone).replace(tzinfo=None)
-        readings.append(RainReading(timestamp=local_timestamp, rainfall_mm=float(raw_value)))
+        # The Environment Agency serves UTC-offset timestamps (trailing 'Z'); keep the canonical
+        # UTC instant rather than converting to local — presentation applies Europe/London.
+        aware_timestamp = datetime.fromisoformat(raw_timestamp.replace("Z", "+00:00")).astimezone(
+            UTC
+        )
+        readings.append(RainReading(timestamp=aware_timestamp, rainfall_mm=float(raw_value)))
     return sorted(readings, key=lambda reading: reading.timestamp)
 
 
@@ -1608,7 +1624,9 @@ def render_aero_bubbles() -> str:
 
 def render_index_html(summary: SiteAnalysisSummary) -> str:
     charts_html = "\n".join(render_aero_chart_card(chart) for chart in summary.dashboard_charts)
-    latest_reading = summary.metadata.data_window_end.strftime("%d %b %Y, %H:%M")
+    latest_reading = utc_to_london_wall_clock(summary.metadata.data_window_end).strftime(
+        "%d %b %Y, %H:%M"
+    )
     tank_footer_html = (
         ""
         if summary.tank_footer_text is None

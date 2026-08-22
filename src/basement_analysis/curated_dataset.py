@@ -19,6 +19,7 @@ from basement_analysis.summaries import (
     SensorReading,
     WeatherHour,
 )
+from basement_analysis.timezones import UTC
 
 # A curated dataset root is either a local directory or an `s3://bucket/prefix` URL that
 # DuckDB reads directly (R2 via its S3-compatible endpoint).
@@ -157,7 +158,7 @@ def sensor_frame(sensor_readings: Sequence[SensorReading]) -> pl.DataFrame:
             ],
         },
         schema={
-            "timestamp": pl.Datetime,
+            "timestamp": pl.Datetime(time_zone="UTC"),
             "location": pl.String,
             "location_slug": pl.String,
             "temperature_c": pl.Float64,
@@ -175,7 +176,7 @@ def event_frame(events: Sequence[Event]) -> pl.DataFrame:
             "description": [event.description for event in events],
         },
         schema={
-            "timestamp": pl.Datetime,
+            "timestamp": pl.Datetime(time_zone="UTC"),
             "description": pl.String,
         },
         strict=True,
@@ -198,7 +199,7 @@ def weather_frame(weather_hours: Sequence[WeatherHour]) -> pl.DataFrame:
             ],
         },
         schema={
-            "timestamp": pl.Datetime,
+            "timestamp": pl.Datetime(time_zone="UTC"),
             "temperature_c": pl.Float64,
             "relative_humidity_pct": pl.Float64,
             "dew_point_c": pl.Float64,
@@ -217,7 +218,7 @@ def rain_frame(rain_readings: Sequence[RainReading]) -> pl.DataFrame:
             "rainfall_mm": [reading.rainfall_mm for reading in rain_readings],
         },
         schema={
-            "timestamp": pl.Datetime,
+            "timestamp": pl.Datetime(time_zone="UTC"),
             "rainfall_mm": pl.Float64,
         },
         strict=True,
@@ -267,8 +268,8 @@ def load_sensor_readings_from_parquet(
             connection,
             join_curated_data_path(dataset_root, "sensor_readings"),
             """
-            select timestamp, location, temperature_c, relative_humidity_pct,
-                   absolute_humidity_g_m3
+            select timestamp at time zone 'UTC' as timestamp, location, temperature_c,
+                   relative_humidity_pct, absolute_humidity_g_m3
             from read_parquet($1, hive_partitioning = true)
             order by location, timestamp
             """,
@@ -276,7 +277,7 @@ def load_sensor_readings_from_parquet(
     )
     return [
         SensorReading(
-            timestamp=timestamp,
+            timestamp=timestamp.replace(tzinfo=UTC),
             location=location,
             temperature_c=temperature_c,
             relative_humidity_pct=relative_humidity_pct,
@@ -301,13 +302,16 @@ def load_events_from_parquet(
             connection,
             join_curated_data_path(dataset_root, "events"),
             """
-            select timestamp, description
+            select timestamp at time zone 'UTC' as timestamp, description
             from read_parquet($1, hive_partitioning = true)
             order by timestamp
             """,
         ),
     )
-    return [Event(timestamp=timestamp, description=description) for timestamp, description in rows]
+    return [
+        Event(timestamp=timestamp.replace(tzinfo=UTC), description=description)
+        for timestamp, description in rows
+    ]
 
 
 def load_weather_hours_from_parquet(
@@ -319,8 +323,9 @@ def load_weather_hours_from_parquet(
             connection,
             join_curated_data_path(dataset_root, "weather_hours"),
             """
-            select timestamp, temperature_c, relative_humidity_pct, dew_point_c,
-                   precipitation_mm, rain_mm, absolute_humidity_g_m3
+            select timestamp at time zone 'UTC' as timestamp, temperature_c,
+                   relative_humidity_pct, dew_point_c, precipitation_mm, rain_mm,
+                   absolute_humidity_g_m3
             from read_parquet($1, hive_partitioning = true)
             order by timestamp
             """,
@@ -328,7 +333,7 @@ def load_weather_hours_from_parquet(
     )
     return [
         WeatherHour(
-            timestamp=timestamp,
+            timestamp=timestamp.replace(tzinfo=UTC),
             temperature_c=temperature_c,
             relative_humidity_pct=relative_humidity_pct,
             dew_point_c=dew_point_c,
@@ -357,14 +362,15 @@ def load_rain_readings_from_parquet(
             connection,
             join_curated_data_path(dataset_root, "rain_readings"),
             """
-            select timestamp, rainfall_mm
+            select timestamp at time zone 'UTC' as timestamp, rainfall_mm
             from read_parquet($1, hive_partitioning = true)
             order by timestamp
             """,
         ),
     )
     return [
-        RainReading(timestamp=timestamp, rainfall_mm=rainfall_mm) for timestamp, rainfall_mm in rows
+        RainReading(timestamp=timestamp.replace(tzinfo=UTC), rainfall_mm=rainfall_mm)
+        for timestamp, rainfall_mm in rows
     ]
 
 

@@ -15,6 +15,7 @@ from basement_analysis.tank_estimator import (
     estimate_tank_gauge,
     gauge_footer_text,
 )
+from basement_analysis.timezones import utc_to_london_wall_clock
 
 ENVIRONMENT_AGENCY_RAIN_STATION = "270397"
 
@@ -641,7 +642,10 @@ def build_tank_footer_text(
 
 
 def format_timestamp(timestamp: datetime) -> str:
-    return timestamp.strftime("%Y-%m-%d %H:%M")
+    # Presentation boundary: canonical timestamps are UTC instants, rendered here in local time.
+    # This also builds the PERIOD_LABEL_BY_EVENT_TIME lookup key, which is keyed on local
+    # wall-clock, so the conversion must happen before formatting.
+    return utc_to_london_wall_clock(timestamp).strftime("%Y-%m-%d %H:%M")
 
 
 def format_optional_float(value: float | None, digits: int = 2) -> str:
