@@ -137,7 +137,9 @@ def stub_weather(monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_rainfall(
         start_date: date, end_date: date, cache_dir: Path, refresh: bool
     ) -> list[RainReading]:
-        return [RainReading(datetime.fromisoformat("2026-07-03T00:00:00"), 0.0)]
+        return [
+            RainReading(timestamp=datetime.fromisoformat("2026-07-03T00:00:00"), rainfall_mm=0.0)
+        ]
 
     monkeypatch.setattr(hosted_curation, "fetch_open_meteo_weather", fake_weather)
     monkeypatch.setattr(hosted_curation, "fetch_environment_agency_rainfall", fake_rainfall)
@@ -167,8 +169,8 @@ def test_weather_and_rain_fetch_from_their_own_recent_watermark(
             weather_hour("2026-08-06T00:00:00"),
         ],
         rain_readings=[
-            RainReading(datetime.fromisoformat("2026-01-01T00:00:00"), 1.5),
-            RainReading(datetime.fromisoformat("2026-08-07T00:00:00"), 0.0),
+            RainReading(timestamp=datetime.fromisoformat("2026-01-01T00:00:00"), rainfall_mm=1.5),
+            RainReading(timestamp=datetime.fromisoformat("2026-08-07T00:00:00"), rainfall_mm=0.0),
         ],
     )
 
@@ -235,14 +237,19 @@ def test_curate_accepted_email_csvs_merges_existing_parquet_and_staged_csvs(
             sensor_reading("2026-07-03T00:01:00", "Basement", 18.5, 67.1),
             sensor_reading("2026-07-04T00:00:00", "Thermo-hygrometer_3", 20.0, 58.0),
         ],
-        events=[Event(datetime.fromisoformat("2026-07-02T21:00:00"), "Dehumidifier on")],
+        events=[
+            Event(
+                timestamp=datetime.fromisoformat("2026-07-02T21:00:00"),
+                description="Dehumidifier on",
+            )
+        ],
         weather_hours=[
             weather_hour("2026-06-01T00:00:00"),
             weather_hour("2026-07-03T00:00:00", temperature_c=16.0),
         ],
         rain_readings=[
-            RainReading(datetime.fromisoformat("2026-06-01T00:00:00"), 1.5),
-            RainReading(datetime.fromisoformat("2026-07-03T00:00:00"), 0.0),
+            RainReading(timestamp=datetime.fromisoformat("2026-06-01T00:00:00"), rainfall_mm=1.5),
+            RainReading(timestamp=datetime.fromisoformat("2026-07-03T00:00:00"), rainfall_mm=0.0),
         ],
     )
 
@@ -294,8 +301,8 @@ def test_curate_accepted_email_csvs_merges_existing_parquet_and_staged_csvs(
         assert cache_dir == tmp_path / "work" / "cache"
         assert refresh
         return [
-            RainReading(datetime.fromisoformat("2026-07-03T00:00:00"), 0.4),
-            RainReading(datetime.fromisoformat("2026-07-04T00:00:00"), 0.2),
+            RainReading(timestamp=datetime.fromisoformat("2026-07-03T00:00:00"), rainfall_mm=0.4),
+            RainReading(timestamp=datetime.fromisoformat("2026-07-04T00:00:00"), rainfall_mm=0.2),
         ]
 
     monkeypatch.setattr(hosted_curation, "fetch_open_meteo_weather", fake_open_meteo_weather)
@@ -357,9 +364,16 @@ def test_curate_refreshes_curated_events_when_a_new_tank_full_line_is_logged(
     write_curated_dataset(
         dataset_dir=existing_dataset_dir,
         sensor_readings=[sensor_reading("2026-07-03T00:00:00", "Basement", 18.5, 67.2)],
-        events=[Event(datetime.fromisoformat("2026-07-02T21:00:00"), "stale seed event")],
+        events=[
+            Event(
+                timestamp=datetime.fromisoformat("2026-07-02T21:00:00"),
+                description="stale seed event",
+            )
+        ],
         weather_hours=[weather_hour("2026-07-03T00:00:00")],
-        rain_readings=[RainReading(datetime.fromisoformat("2026-07-03T00:00:00"), 0.0)],
+        rain_readings=[
+            RainReading(timestamp=datetime.fromisoformat("2026-07-03T00:00:00"), rainfall_mm=0.0)
+        ],
     )
 
     object_store_dir = tmp_path / "objects"
@@ -647,20 +661,20 @@ def _events_dir(tmp_path: Path) -> Path:
 
 def test_merge_rain_readings_keeps_old_rows_and_prefers_fresh_on_conflict() -> None:
     existing = [
-        RainReading(datetime.fromisoformat("2026-06-01T00:00:00"), 1.5),
-        RainReading(datetime.fromisoformat("2026-07-03T00:00:00"), 0.0),
+        RainReading(timestamp=datetime.fromisoformat("2026-06-01T00:00:00"), rainfall_mm=1.5),
+        RainReading(timestamp=datetime.fromisoformat("2026-07-03T00:00:00"), rainfall_mm=0.0),
     ]
     fresh = [
-        RainReading(datetime.fromisoformat("2026-07-03T00:00:00"), 0.4),
-        RainReading(datetime.fromisoformat("2026-07-04T00:00:00"), 0.2),
+        RainReading(timestamp=datetime.fromisoformat("2026-07-03T00:00:00"), rainfall_mm=0.4),
+        RainReading(timestamp=datetime.fromisoformat("2026-07-04T00:00:00"), rainfall_mm=0.2),
     ]
 
     merged = merge_rain_readings([*existing, *fresh])
 
     assert merged == [
-        RainReading(datetime.fromisoformat("2026-06-01T00:00:00"), 1.5),
-        RainReading(datetime.fromisoformat("2026-07-03T00:00:00"), 0.4),
-        RainReading(datetime.fromisoformat("2026-07-04T00:00:00"), 0.2),
+        RainReading(timestamp=datetime.fromisoformat("2026-06-01T00:00:00"), rainfall_mm=1.5),
+        RainReading(timestamp=datetime.fromisoformat("2026-07-03T00:00:00"), rainfall_mm=0.4),
+        RainReading(timestamp=datetime.fromisoformat("2026-07-04T00:00:00"), rainfall_mm=0.2),
     ]
 
 

@@ -5,7 +5,6 @@ import hashlib
 import json
 import shutil
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from email.message import Message
 from email.parser import BytesParser
@@ -13,6 +12,8 @@ from email.policy import default
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import cast
+
+from pydantic import BaseModel, ConfigDict
 
 PARSER_VERSION = "basement_analysis.raw_email_ingest.v1"
 X_SENSE_RAW_OBJECT_KEY_PREFIX = "raw-emails/source=x-sense"
@@ -23,22 +24,25 @@ REQUIRED_SENSOR_COLUMNS = (
 )
 
 
-@dataclass(frozen=True)
-class RawEmailInput:
+class RawEmailInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     path: Path
     object_key: str
 
 
-@dataclass(frozen=True)
-class CsvValidationResult:
+class CsvValidationResult(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     status: str
     row_count: int
     reason: str
     export_date: date | None
 
 
-@dataclass(frozen=True)
-class AttachmentResult:
+class AttachmentResult(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     filename: str
     content_sha256: str
     status: str
@@ -47,8 +51,9 @@ class AttachmentResult:
     csv_object_key: str | None
 
 
-@dataclass(frozen=True)
-class EmailIngestResult:
+class EmailIngestResult(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     raw_object_key: str
     raw_sha256: str
     message_id: str
@@ -58,8 +63,7 @@ class EmailIngestResult:
     attachment_results: tuple[AttachmentResult, ...]
 
 
-@dataclass
-class IngestState:
+class IngestState(BaseModel):
     raw_sha256_values: set[str]
     message_ids: set[str]
     csv_sha256_values: set[str]

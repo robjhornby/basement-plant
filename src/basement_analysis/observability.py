@@ -5,23 +5,26 @@ import logging
 import time
 from collections.abc import Generator, Mapping
 from contextlib import contextmanager
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
+from pydantic import BaseModel, ConfigDict
+
 phase_logger = logging.getLogger("basement_analysis.phases")
 
 
-@dataclass(frozen=True)
-class PhaseTiming:
+class PhaseTiming(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     name: str
     duration_seconds: float
 
 
-@dataclass(frozen=True)
-class CommandTimingRecord:
+class CommandTimingRecord(BaseModel):
     """One CLI command's phase timings plus the counts it reported, as persisted JSON."""
+
+    model_config = ConfigDict(frozen=True)
 
     command: str
     recorded_at: str

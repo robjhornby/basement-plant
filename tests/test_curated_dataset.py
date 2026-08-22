@@ -62,9 +62,16 @@ def test_curated_dataset_round_trips_through_partitioned_parquet_and_duckdb(
             sensor_reading("2026-06-28T15:00:00", "Basement", 18.0, 88.0),
             sensor_reading("2026-07-02T22:00:00", "Living room", 21.0, 58.0),
         ],
-        events=[Event(datetime.fromisoformat("2026-06-28T16:20:00"), "Bare floor exposed")],
+        events=[
+            Event(
+                timestamp=datetime.fromisoformat("2026-06-28T16:20:00"),
+                description="Bare floor exposed",
+            )
+        ],
         weather_hours=[weather_hour("2026-06-28T15:00:00")],
-        rain_readings=[RainReading(datetime.fromisoformat("2026-06-28T15:15:00"), 0.2)],
+        rain_readings=[
+            RainReading(timestamp=datetime.fromisoformat("2026-06-28T15:15:00"), rainfall_mm=0.2)
+        ],
     )
 
     relative_paths = {path.relative_to(dataset_dir).as_posix() for path in parquet_files}
@@ -140,7 +147,9 @@ def test_static_site_builds_from_curated_parquet_path(
         assert end_date == date(2026, 7, 2)
         assert not refresh
         assert cache_dir.name == "cache"
-        return [RainReading(datetime.fromisoformat("2026-07-02T22:10:00"), 0.4)]
+        return [
+            RainReading(timestamp=datetime.fromisoformat("2026-07-02T22:10:00"), rainfall_mm=0.4)
+        ]
 
     monkeypatch.setattr(static_site, "fetch_open_meteo_weather", fake_open_meteo_weather)
     monkeypatch.setattr(
@@ -239,7 +248,9 @@ def test_build_static_site_can_write_private_report_for_local_analysis(
         assert end_date == date(2026, 7, 2)
         assert cache_dir.name == "cache"
         assert not refresh
-        return [RainReading(datetime.fromisoformat("2026-07-02T22:10:00"), 0.4)]
+        return [
+            RainReading(timestamp=datetime.fromisoformat("2026-07-02T22:10:00"), rainfall_mm=0.4)
+        ]
 
     monkeypatch.setattr(static_site, "fetch_open_meteo_weather", fake_open_meteo_weather)
     monkeypatch.setattr(

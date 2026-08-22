@@ -235,8 +235,14 @@ def test_site_analysis_summary_builds_shared_dashboard_and_report_values() -> No
         sensor_reading("2026-07-02T22:00:00", "Living room", 21.0, 58.0),
     ]
     events = [
-        Event(datetime.fromisoformat("2026-06-28T16:20:00"), "Bare floor exposed"),
-        Event(datetime.fromisoformat("2026-07-02T21:00:00"), "Fan orientation uncertain"),
+        Event(
+            timestamp=datetime.fromisoformat("2026-06-28T16:20:00"),
+            description="Bare floor exposed",
+        ),
+        Event(
+            timestamp=datetime.fromisoformat("2026-07-02T21:00:00"),
+            description="Fan orientation uncertain",
+        ),
     ]
     weather_hours = [
         weather_hour("2026-06-28T15:00:00", 16.0, 70.0),
@@ -244,8 +250,8 @@ def test_site_analysis_summary_builds_shared_dashboard_and_report_values() -> No
         weather_hour("2026-07-02T22:00:00", 17.0, 68.0),
     ]
     rain_readings = [
-        RainReading(datetime.fromisoformat("2026-07-02T22:10:00"), 0.4),
-        RainReading(datetime.fromisoformat("2026-07-02T22:40:00"), 0.6),
+        RainReading(timestamp=datetime.fromisoformat("2026-07-02T22:10:00"), rainfall_mm=0.4),
+        RainReading(timestamp=datetime.fromisoformat("2026-07-02T22:40:00"), rainfall_mm=0.6),
     ]
 
     summary = build_site_analysis_summary(
@@ -291,7 +297,9 @@ def test_dashboard_chart_payload_matches_final_redesign_lineup() -> None:
         ],
         events=[],
         weather_hours=[weather_hour("2026-07-02T22:00:00", 17.0, 68.0)],
-        rain_readings=[RainReading(datetime.fromisoformat("2026-07-02T22:10:00"), 0.4)],
+        rain_readings=[
+            RainReading(timestamp=datetime.fromisoformat("2026-07-02T22:10:00"), rainfall_mm=0.4)
+        ],
         generated_at=datetime.fromisoformat("2026-07-05T12:00:00"),
     )
 
@@ -352,7 +360,9 @@ def test_dashboard_axes_use_verbatim_measure_slash_unit_labels() -> None:
         ],
         events=[],
         weather_hours=[weather_hour("2026-07-02T22:00:00", 17.0, 68.0)],
-        rain_readings=[RainReading(datetime.fromisoformat("2026-07-02T22:10:00"), 0.4)],
+        rain_readings=[
+            RainReading(timestamp=datetime.fromisoformat("2026-07-02T22:10:00"), rainfall_mm=0.4)
+        ],
         generated_at=datetime.fromisoformat("2026-07-05T12:00:00"),
     )
 
@@ -479,11 +489,19 @@ def test_dashboard_and_report_render_from_shared_summary() -> None:
     summary = build_site_analysis_summary(
         sensor_readings=sensor_readings,
         events=[
-            Event(datetime.fromisoformat("2026-06-28T16:20:00"), "Bare floor exposed"),
-            Event(datetime.fromisoformat("2026-07-02T21:00:00"), "Fan orientation uncertain"),
+            Event(
+                timestamp=datetime.fromisoformat("2026-06-28T16:20:00"),
+                description="Bare floor exposed",
+            ),
+            Event(
+                timestamp=datetime.fromisoformat("2026-07-02T21:00:00"),
+                description="Fan orientation uncertain",
+            ),
         ],
         weather_hours=[weather_hour("2026-07-02T22:00:00", 17.0, 68.0)],
-        rain_readings=[RainReading(datetime.fromisoformat("2026-07-02T22:10:00"), 0.4)],
+        rain_readings=[
+            RainReading(timestamp=datetime.fromisoformat("2026-07-02T22:10:00"), rainfall_mm=0.4)
+        ],
         generated_at=datetime.fromisoformat("2026-07-05T12:00:00"),
     )
 
@@ -556,9 +574,16 @@ def test_dashboard_renders_self_contained_uplot_charts() -> None:
             sensor_reading("2026-06-28T15:00:00", "Basement", 18.0, 88.0),
             sensor_reading("2026-07-02T22:00:00", "Basement", 19.0, 72.0),
         ],
-        events=[Event(datetime.fromisoformat("2026-06-28T16:20:00"), "Bare floor exposed")],
+        events=[
+            Event(
+                timestamp=datetime.fromisoformat("2026-06-28T16:20:00"),
+                description="Bare floor exposed",
+            )
+        ],
         weather_hours=[weather_hour("2026-07-02T22:00:00", 17.0, 68.0)],
-        rain_readings=[RainReading(datetime.fromisoformat("2026-07-02T22:10:00"), 0.4)],
+        rain_readings=[
+            RainReading(timestamp=datetime.fromisoformat("2026-07-02T22:10:00"), rainfall_mm=0.4)
+        ],
         generated_at=datetime.fromisoformat("2026-07-05T12:00:00"),
     )
 
@@ -581,9 +606,16 @@ def test_charts_include_touch_interactions_without_trapping_page_scroll() -> Non
             sensor_reading("2026-06-28T15:00:00", "Basement", 18.0, 88.0),
             sensor_reading("2026-07-02T22:00:00", "Basement", 19.0, 72.0),
         ],
-        events=[Event(datetime.fromisoformat("2026-06-28T16:20:00"), "Bare floor exposed")],
+        events=[
+            Event(
+                timestamp=datetime.fromisoformat("2026-06-28T16:20:00"),
+                description="Bare floor exposed",
+            )
+        ],
         weather_hours=[weather_hour("2026-07-02T22:00:00", 17.0, 68.0)],
-        rain_readings=[RainReading(datetime.fromisoformat("2026-07-02T22:10:00"), 0.4)],
+        rain_readings=[
+            RainReading(timestamp=datetime.fromisoformat("2026-07-02T22:10:00"), rainfall_mm=0.4)
+        ],
         generated_at=datetime.fromisoformat("2026-07-05T12:00:00"),
     )
 
@@ -605,9 +637,16 @@ def test_render_site_pages_returns_public_relative_path_to_html_mapping() -> Non
             sensor_reading("2026-06-28T15:00:00", "Basement", 18.0, 88.0),
             sensor_reading("2026-07-02T22:00:00", "Basement", 19.0, 72.0),
         ],
-        events=[Event(datetime.fromisoformat("2026-06-28T16:20:00"), "Bare floor exposed")],
+        events=[
+            Event(
+                timestamp=datetime.fromisoformat("2026-06-28T16:20:00"),
+                description="Bare floor exposed",
+            )
+        ],
         weather_hours=[weather_hour("2026-07-02T22:00:00", 17.0, 68.0)],
-        rain_readings=[RainReading(datetime.fromisoformat("2026-07-02T22:10:00"), 0.4)],
+        rain_readings=[
+            RainReading(timestamp=datetime.fromisoformat("2026-07-02T22:10:00"), rainfall_mm=0.4)
+        ],
         generated_at=datetime.fromisoformat("2026-07-05T12:00:00"),
     )
 
@@ -623,9 +662,16 @@ def test_render_private_report_pages_keeps_local_report_available() -> None:
             sensor_reading("2026-06-28T15:00:00", "Basement", 18.0, 88.0),
             sensor_reading("2026-07-02T22:00:00", "Basement", 19.0, 72.0),
         ],
-        events=[Event(datetime.fromisoformat("2026-06-28T16:20:00"), "Bare floor exposed")],
+        events=[
+            Event(
+                timestamp=datetime.fromisoformat("2026-06-28T16:20:00"),
+                description="Bare floor exposed",
+            )
+        ],
         weather_hours=[weather_hour("2026-07-02T22:00:00", 17.0, 68.0)],
-        rain_readings=[RainReading(datetime.fromisoformat("2026-07-02T22:10:00"), 0.4)],
+        rain_readings=[
+            RainReading(timestamp=datetime.fromisoformat("2026-07-02T22:10:00"), rainfall_mm=0.4)
+        ],
         generated_at=datetime.fromisoformat("2026-07-05T12:00:00"),
     )
 

@@ -4,10 +4,11 @@ import math
 import sys
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Literal
+
+from pydantic import BaseModel, ConfigDict
 
 from basement_analysis.tank_estimator import (
     TankEstimateFailure,
@@ -43,8 +44,9 @@ SENSOR_CHART_RECENT_BUCKET_MINUTES = 10
 SENSOR_CHART_HISTORICAL_BUCKET_MINUTES = 60
 
 
-@dataclass(frozen=True)
-class SensorReading:
+class SensorReading(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     timestamp: datetime
     location: str
     temperature_c: float
@@ -52,14 +54,16 @@ class SensorReading:
     absolute_humidity_g_m3: float
 
 
-@dataclass(frozen=True)
-class Event:
+class Event(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     timestamp: datetime
     description: str
 
 
-@dataclass(frozen=True)
-class WeatherHour:
+class WeatherHour(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     timestamp: datetime
     temperature_c: float
     relative_humidity_pct: float
@@ -69,14 +73,16 @@ class WeatherHour:
     absolute_humidity_g_m3: float
 
 
-@dataclass(frozen=True)
-class RainReading:
+class RainReading(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     timestamp: datetime
     rainfall_mm: float
 
 
-@dataclass(frozen=True)
-class AggregatedReading:
+class AggregatedReading(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     timestamp: datetime
     location: str
     temperature_c: float
@@ -90,16 +96,18 @@ class AggregatedReading:
     max_absolute_humidity_g_m3: float
 
 
-@dataclass(frozen=True)
-class Period:
+class Period(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     label: str
     start: datetime
     end: datetime
     event: Event | None
 
 
-@dataclass(frozen=True)
-class PeriodSummary:
+class PeriodSummary(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     label: str
     start: datetime
     end: datetime
@@ -113,8 +121,9 @@ class PeriodSummary:
     rain_mm: float
 
 
-@dataclass(frozen=True)
-class SiteMetadata:
+class SiteMetadata(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     generated_at: datetime
     data_window_start: datetime
     data_window_end: datetime
@@ -125,15 +134,17 @@ class SiteMetadata:
     event_timeline_source: Path | str | None
 
 
-@dataclass(frozen=True)
-class MetricCard:
+class MetricCard(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     label: str
     value: str
     caveat_ids: tuple[str, ...] = ()
 
 
-@dataclass(frozen=True)
-class ChartSeries:
+class ChartSeries(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     name: str
     color: str
     points: tuple[tuple[datetime, float], ...]
@@ -145,16 +156,18 @@ class ChartSeries:
     scale: str = "y"
 
 
-@dataclass(frozen=True)
-class ChartAxis:
+class ChartAxis(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     scale: str
     label: str
     side: str = "left"
     show: bool = True
 
 
-@dataclass(frozen=True)
-class ChartSpec:
+class ChartSpec(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     title: str
     axes: tuple[ChartAxis, ...]
     series: tuple[ChartSeries, ...]
@@ -163,8 +176,9 @@ class ChartSpec:
     caveat_ids: tuple[str, ...] = ()
 
 
-@dataclass(frozen=True)
-class RainChartSpec:
+class RainChartSpec(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     title: str
     y_label: str
     hourly_points: tuple[tuple[datetime, float], ...]
@@ -172,16 +186,18 @@ class RainChartSpec:
     caveat_ids: tuple[str, ...] = ()
 
 
-@dataclass(frozen=True)
-class HypothesisAssessment:
+class HypothesisAssessment(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     name: HypothesisName
     evidence_state: str
     summary: str
     caveat_ids: tuple[str, ...] = ()
 
 
-@dataclass(frozen=True)
-class Caveat:
+class Caveat(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     id: str
     short_label: str
     dashboard_text: str
@@ -189,8 +205,9 @@ class Caveat:
     applies_to: tuple[str, ...]
 
 
-@dataclass(frozen=True)
-class UncertaintyBudgetRow:
+class UncertaintyBudgetRow(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     component: str
     applies_to: str
     treatment: str
@@ -198,8 +215,9 @@ class UncertaintyBudgetRow:
     caveat_ids: tuple[str, ...] = ()
 
 
-@dataclass(frozen=True)
-class SiteAnalysisSummary:
+class SiteAnalysisSummary(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     metadata: SiteMetadata
     metric_cards: tuple[MetricCard, ...]
     period_summaries: tuple[PeriodSummary, ...]
@@ -867,21 +885,31 @@ def build_metric_cards(
         else latest_basement.absolute_humidity_g_m3 - latest_outdoor_ah
     )
     return (
-        MetricCard("Latest basement sample", format_timestamp(latest_basement.timestamp)),
-        MetricCard("Basement RH", f"{latest_basement.relative_humidity_pct:.1f}%"),
-        MetricCard("Basement AH", f"{latest_basement.absolute_humidity_g_m3:.2f} g/m3"),
-        MetricCard("Latest weather hour", latest_weather_text, ("weather_source_mismatch",)),
         MetricCard(
-            "Outdoor AH",
-            f"{format_optional_float(latest_outdoor_ah, 2)} g/m3",
-            ("weather_source_mismatch",),
+            label="Latest basement sample", value=format_timestamp(latest_basement.timestamp)
+        ),
+        MetricCard(label="Basement RH", value=f"{latest_basement.relative_humidity_pct:.1f}%"),
+        MetricCard(label="Basement AH", value=f"{latest_basement.absolute_humidity_g_m3:.2f} g/m3"),
+        MetricCard(
+            label="Latest weather hour",
+            value=latest_weather_text,
+            caveat_ids=("weather_source_mismatch",),
         ),
         MetricCard(
-            "Indoor - outdoor AH",
-            f"{format_optional_float(indoor_outdoor_delta, 2)} g/m3",
-            ("weather_source_mismatch",),
+            label="Outdoor AH",
+            value=f"{format_optional_float(latest_outdoor_ah, 2)} g/m3",
+            caveat_ids=("weather_source_mismatch",),
         ),
-        MetricCard("EA rain in dataset", f"{total_rain:.1f} mm", ("weather_source_mismatch",)),
+        MetricCard(
+            label="Indoor - outdoor AH",
+            value=f"{format_optional_float(indoor_outdoor_delta, 2)} g/m3",
+            caveat_ids=("weather_source_mismatch",),
+        ),
+        MetricCard(
+            label="EA rain in dataset",
+            value=f"{total_rain:.1f} mm",
+            caveat_ids=("weather_source_mismatch",),
+        ),
     )
 
 

@@ -3,12 +3,12 @@ from __future__ import annotations
 import json
 import os
 import re
-from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import cast
 
 import duckdb
+from pydantic import BaseModel, ConfigDict
 
 from basement_analysis.curated_dataset import (
     CuratedDataRoot,
@@ -36,8 +36,9 @@ OVERLAP_DAYS = 2
 MANIFEST_GLOB = "manifests/ingest/**/*.json"
 
 
-@dataclass(frozen=True)
-class HostedCurationResult:
+class HostedCurationResult(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     curated_dataset_dir: Path
     accepted_csv_count: int
     selected_csv_count: int

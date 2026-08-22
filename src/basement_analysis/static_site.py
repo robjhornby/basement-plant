@@ -9,7 +9,6 @@ import re
 import shutil
 import time
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from datetime import date, datetime
 from functools import lru_cache
 from pathlib import Path
@@ -18,6 +17,8 @@ from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import urlopen
 from zoneinfo import ZoneInfo
+
+from pydantic import BaseModel, ConfigDict
 
 from basement_analysis.curated_dataset import (
     CuratedDataRoot,
@@ -83,8 +84,9 @@ SENSOR_FILENAME_LABEL_PATTERNS = (
 )
 
 
-@dataclass(frozen=True)
-class BuildResult:
+class BuildResult(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     index_path: Path
     private_report_path: Path | None
     curated_dataset_dir: CuratedDataRoot

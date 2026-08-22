@@ -4,13 +4,13 @@ import os
 import re
 import shutil
 from collections.abc import Sequence
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import cast
 
 import duckdb
 import polars as pl
+from pydantic import BaseModel, ConfigDict
 
 from basement_analysis.summaries import (
     ENVIRONMENT_AGENCY_RAIN_STATION,
@@ -27,8 +27,9 @@ CuratedDataRoot = Path | str
 R2_CREDENTIAL_ENV_VARS = ("R2_ENDPOINT_URL", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY")
 
 
-@dataclass(frozen=True)
-class CuratedDataset:
+class CuratedDataset(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     sensor_readings: tuple[SensorReading, ...]
     events: tuple[Event, ...]
     weather_hours: tuple[WeatherHour, ...]

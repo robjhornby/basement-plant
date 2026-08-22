@@ -23,9 +23,10 @@ from __future__ import annotations
 import math
 import statistics
 from collections.abc import Sequence
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Literal, Protocol
+
+from pydantic import BaseModel, ConfigDict
 
 
 class BasementReading(Protocol):
@@ -59,20 +60,23 @@ EPISODE_MERGE_RESUMED_CYCLING_HOURS = 8
 TankState = Literal["predicted_next_full", "not_running", "filling_longer_than_expected"]
 
 
-@dataclass(frozen=True)
-class TankEstimateFailure:
+class TankEstimateFailure(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     reason: str
 
 
-@dataclass(frozen=True)
-class FillInterval:
+class FillInterval(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     started_at: datetime
     full_at: datetime
     extraction_cycles: int
 
 
-@dataclass(frozen=True)
-class TankHistory:
+class TankHistory(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     tank_full_events: tuple[datetime, ...]
     tank_emptied_events: tuple[datetime, ...]
     complete_fill_intervals: tuple[FillInterval, ...]
@@ -84,8 +88,9 @@ class TankHistory:
     footer_text: str
 
 
-@dataclass(frozen=True)
-class TankFullEpisode:
+class TankFullEpisode(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     full_position: int
     emptied_position: int
 
@@ -97,8 +102,7 @@ def estimate_tank_history(
         (
             reading
             for reading in sensor_readings
-            if reading.location == "Basement"
-            and reading.timestamp >= DEHUMIDIFIER_INSTALLED_AT
+            if reading.location == "Basement" and reading.timestamp >= DEHUMIDIFIER_INSTALLED_AT
         ),
         key=lambda reading: reading.timestamp,
     )
@@ -315,8 +319,7 @@ def detect_tank_full_episodes(
         while scan < len(trough_indices) - 1:
             if gap_qualifies(timestamps, smoothed, trough_indices, interval_start_position, scan):
                 resumed_cycling = (
-                    timestamps[trough_indices[scan]]
-                    - timestamps[trough_indices[emptied_position]]
+                    timestamps[trough_indices[scan]] - timestamps[trough_indices[emptied_position]]
                 )
                 if resumed_cycling < timedelta(hours=EPISODE_MERGE_RESUMED_CYCLING_HOURS):
                     emptied_position = scan + 1
@@ -349,9 +352,7 @@ def in_tank_full_episode_at_latest_reading(
 
 def displayed_uncertainty_days(fill_durations: Sequence[timedelta]) -> float:
     """Half the duration range, rounded to the nearest half day, floored at half a day."""
-    half_range_days = (
-        max(fill_durations) - min(fill_durations)
-    ).total_seconds() / 2 / 86400
+    half_range_days = (max(fill_durations) - min(fill_durations)).total_seconds() / 2 / 86400
     return max(0.5, round(half_range_days * 2) / 2)
 
 
@@ -417,17 +418,19 @@ RESUME_FALLBACK_HOURS = 6
 FULL_FRACTION_THRESHOLD = 0.95
 
 
-@dataclass(frozen=True)
-class DrawdownCycle:
+class DrawdownCycle(BaseModel):
     """One extraction cycle's moisture drawdown: the trough time and the
     absolute-humidity drop from its preceding peak (clamped at zero)."""
+
+    model_config = ConfigDict(frozen=True)
 
     trough_at: datetime
     drawdown: float
 
 
-@dataclass(frozen=True)
-class TankGauge:
+class TankGauge(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     completed_fill_count: int
     litres_removed: int
     dose_per_tank: float
@@ -459,8 +462,7 @@ def estimate_tank_gauge(
         (
             reading
             for reading in sensor_readings
-            if reading.location == "Basement"
-            and reading.timestamp >= DEHUMIDIFIER_INSTALLED_AT
+            if reading.location == "Basement" and reading.timestamp >= DEHUMIDIFIER_INSTALLED_AT
         ),
         key=lambda reading: reading.timestamp,
     )
