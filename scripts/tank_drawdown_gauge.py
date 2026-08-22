@@ -38,7 +38,7 @@ from basement_analysis.summaries import Event, dehumidifier_installed_at
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 SNAPSHOT_DIRECTORY = (
     REPOSITORY_ROOT / "data" / "parquet-2026-08-07"
-)  # local `aws s3 cp` of parquet/ from R2
+)  # local `aws s3 cp` of datasets/ from R2
 TANK_CAPACITY_LITRES = 25
 
 # Signal processing (kept aligned with the shipped estimator so cycle detection is comparable)
@@ -69,7 +69,7 @@ def load_basement(installed_at: datetime) -> tuple[np.ndarray, np.ndarray, np.nd
         f"""
         select epoch(timestamp)::bigint, relative_humidity_pct, absolute_humidity_g_m3
         from read_parquet(
-            '{SNAPSHOT_DIRECTORY}/sensor_readings/**/*.parquet', hive_partitioning=true
+            '{SNAPSHOT_DIRECTORY}/sensor-readings/**/*.parquet', hive_partitioning=true
         )
         where location = 'Basement'
           and timestamp >= timestamptz '{installed_at.isoformat()}'
@@ -250,7 +250,7 @@ def main() -> None:
             f"Snapshot not found: {SNAPSHOT_DIRECTORY}\n"
             "Pull it with (creds in the repo .envrc):\n"
             "  AWS_ACCESS_KEY_ID=$R2_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY=$R2_SECRET_ACCESS_KEY \\\n"
-            "  aws s3 cp s3://$R2_BUCKET/parquet/ <dir>/ --recursive "
+            "  aws s3 cp s3://$R2_BUCKET/datasets/ <dir>/ --recursive "
             "--endpoint-url $R2_ENDPOINT_URL"
         )
     analysis = Analysis()

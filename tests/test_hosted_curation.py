@@ -65,11 +65,13 @@ def weather_hour(raw_timestamp: str, temperature_c: float = 16.0) -> WeatherHour
     )
 
 
-def manifest_json(status: str, attachment_status: str, csv_object_key: str | None) -> str:
+def manifest_json(status: str, attachment_status: str, attachment_object_key: str | None) -> str:
     return json.dumps(
         {
             "status": status,
-            "attachments": [{"status": attachment_status, "csv_object_key": csv_object_key}],
+            "attachments": [
+                {"status": attachment_status, "attachment_object_key": attachment_object_key}
+            ],
         }
     )
 
@@ -81,24 +83,24 @@ def write_manifest(
     name: str,
     status: str,
     attachment_status: str,
-    csv_object_key: str | None,
+    attachment_object_key: str | None,
 ) -> None:
     manifest_path = (
         object_store_dir
-        / "manifests"
         / "ingest"
-        / "source=x-sense"
+        / "x-sense"
+        / "outcomes"
         / f"received_date={received_date}"
         / f"{name}.json"
     )
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(
-        manifest_json(status, attachment_status, csv_object_key), encoding="utf-8"
+        manifest_json(status, attachment_status, attachment_object_key), encoding="utf-8"
     )
 
 
 def csv_object_key(export_date: str, sha: str, filename: str) -> str:
-    return f"csv/source=x-sense/export_date={export_date}/attachment_sha256={sha}/{filename}"
+    return f"ingest/x-sense/attachments/export_date={export_date}/sha256={sha}/{filename}"
 
 
 def write_csv_object(object_store_dir: Path, object_key: str, rows: list[str]) -> None:
@@ -128,7 +130,7 @@ def write_accepted_csv(
         name=sha,
         status="accepted",
         attachment_status="extracted",
-        csv_object_key=object_key,
+        attachment_object_key=object_key,
     )
 
 
@@ -242,12 +244,12 @@ def test_weather_and_rain_fetch_from_their_own_recent_watermark(
 
 def test_accepted_csv_keys_from_manifest_texts_only_uses_extracted_accepted_attachments() -> None:
     manifest_texts = [
-        manifest_json("accepted", "extracted", "csv/source=x/a.csv"),
-        manifest_json("rejected", "extracted", "csv/source=x/b.csv"),
+        manifest_json("accepted", "extracted", "ingest/x/attachments/a.csv"),
+        manifest_json("rejected", "extracted", "ingest/x/attachments/b.csv"),
         manifest_json("accepted", "invalid_csv", None),
     ]
 
-    assert accepted_csv_keys_from_manifest_texts(manifest_texts) == ("csv/source=x/a.csv",)
+    assert accepted_csv_keys_from_manifest_texts(manifest_texts) == ("ingest/x/attachments/a.csv",)
 
 
 def test_curate_accepted_email_csvs_merges_existing_parquet_and_staged_csvs(
@@ -651,7 +653,7 @@ def test_non_accepted_manifest_excludes_its_csv(
         name="good",
         status="accepted",
         attachment_status="extracted",
-        csv_object_key=accepted_key,
+        attachment_object_key=accepted_key,
     )
     rejected_key = csv_object_key("2026-07-03", "bad", "Thermo-hygrometer_Export_Data_2.csv")
     write_csv_object(object_store_dir, rejected_key, ["2026/07/03 00:00,99.0,99.0"])
@@ -661,7 +663,7 @@ def test_non_accepted_manifest_excludes_its_csv(
         name="bad",
         status="rejected",
         attachment_status="extracted",
-        csv_object_key=rejected_key,
+        attachment_object_key=rejected_key,
     )
     empty_existing = tmp_path / "empty-existing"
     empty_existing.mkdir()

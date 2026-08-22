@@ -85,11 +85,10 @@ def test_curated_dataset_round_trips_through_partitioned_parquet_and_duckdb(
 
     relative_paths = {path.relative_to(dataset_dir).as_posix() for path in parquet_files}
     assert (
-        "sensor_readings/source=x_sense/location_slug=basement/year=2026/month=06/"
-        "part-00000.parquet"
+        "sensor-readings/source=x-sense/location=Basement/year=2026/month=06/part-00000.parquet"
     ) in relative_paths
     assert (
-        f"rain_readings/source=environment_agency/station={ENVIRONMENT_AGENCY_RAIN_STATION}/"
+        f"rain-readings/source=environment-agency/station={ENVIRONMENT_AGENCY_RAIN_STATION}/"
         "year=2026/month=06/part-00000.parquet"
     ) in relative_paths
     assert "events/year=2026/part-00000.parquet" in relative_paths
@@ -191,14 +190,16 @@ def test_static_site_builds_from_curated_parquet_path(
 
 def test_parse_curated_data_location_handles_local_and_s3() -> None:
     assert parse_curated_data_location("build/curated") == Path("build/curated")
-    assert parse_curated_data_location("s3://bucket/parquet/") == "s3://bucket/parquet"
+    assert parse_curated_data_location("s3://bucket/datasets/") == "s3://bucket/datasets"
     with pytest.raises(ValueError, match="bucket"):
         parse_curated_data_location("s3://")
 
 
 def test_join_curated_data_path_for_both_location_kinds() -> None:
     assert join_curated_data_path(Path("curated"), "events") == Path("curated") / "events"
-    assert join_curated_data_path("s3://bucket/parquet", "events") == "s3://bucket/parquet/events"
+    assert join_curated_data_path("s3://bucket/datasets", "events") == (
+        "s3://bucket/datasets/events"
+    )
 
 
 def test_load_curated_dataset_from_s3_requires_r2_environment(
@@ -208,7 +209,7 @@ def test_load_curated_dataset_from_s3_requires_r2_environment(
         monkeypatch.delenv(variable_name, raising=False)
 
     with pytest.raises(ValueError, match="R2_ENDPOINT_URL"):
-        load_curated_dataset("s3://bucket/parquet")
+        load_curated_dataset("s3://bucket/datasets")
 
 
 def test_load_curated_dataset_can_skip_legacy_event_schema(tmp_path: Path) -> None:
@@ -239,7 +240,7 @@ def test_build_static_site_rejects_rebuilding_into_s3_location(tmp_path: Path) -
         static_site.build_static_site(
             data_dir=tmp_path,
             output_dir=tmp_path / "site",
-            curated_dataset_dir="s3://bucket/parquet",
+            curated_dataset_dir="s3://bucket/datasets",
         )
 
 

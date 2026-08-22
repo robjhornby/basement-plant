@@ -25,11 +25,7 @@ from basement_analysis.observability import (
     write_build_info,
     write_command_timing_record,
 )
-from basement_analysis.raw_email_ingest import (
-    X_SENSE_RAW_OBJECT_KEY_PREFIX,
-    print_ingest_results,
-    process_raw_email_batch,
-)
+from basement_analysis.raw_email_ingest import print_ingest_results, process_raw_email_batch
 from basement_analysis.static_site import build_static_site
 
 DEFAULT_TIMINGS_DIR = Path("build/timings")
@@ -204,20 +200,11 @@ def ingest_emails(argv: Sequence[str] | None = None) -> None:
         default=Path("build/basement-ingest-objects"),
         help="Local directory that mirrors the R2 object-key layout.",
     )
-    parser.add_argument(
-        "--raw-object-key-prefix",
-        default=X_SENSE_RAW_OBJECT_KEY_PREFIX,
-        help=(
-            "Object-key prefix prepended to local .eml relative paths. Use an empty string when "
-            "--raw-email-dir already points at an object-store root."
-        ),
-    )
     args = parser.parse_args(argv)
 
     results = process_raw_email_batch(
         raw_email_dir=args.raw_email_dir,
         object_store_dir=args.object_store_dir,
-        raw_object_key_prefix=args.raw_object_key_prefix,
     )
     print_ingest_results(results)
 
@@ -235,7 +222,7 @@ def curate_ingested_r2(argv: Sequence[str] | None = None) -> None:
         type=parse_curated_data_location,
         default=parse_curated_data_location("build/r2-pipeline"),
         help=(
-            "Root of the ingest object store holding manifests/ingest and csv/source=x-sense: a "
+            "Root of the object store holding ingest/x-sense outcomes and attachments: a "
             "local directory or an s3:// URL read directly via DuckDB (R2 credentials from "
             "R2_ENDPOINT_URL, R2_ACCESS_KEY_ID, and R2_SECRET_ACCESS_KEY)."
         ),
@@ -259,7 +246,9 @@ def curate_ingested_r2(argv: Sequence[str] | None = None) -> None:
         "--existing-curated-data-dir",
         type=parse_curated_data_location,
         default=None,
-        help=("Existing curated Parquet root to merge from. Defaults to s3://$R2_BUCKET/parquet."),
+        help=(
+            "Existing analytical dataset root to merge from. Defaults to s3://$R2_BUCKET/datasets."
+        ),
     )
     parser.add_argument(
         "--work-dir",

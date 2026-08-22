@@ -3,14 +3,13 @@ import PostalMime, { type Email } from "postal-mime";
 /**
  * Email-to-R2 ingest core.
  *
- * Writes the exact same object-key layout and manifest shape as the Python
+ * Writes the same object-key layout and outcome shape as the Python
  * batch parser (src/basement_analysis/raw_email_ingest.py) so hosted and
  * local ingest are interchangeable:
  *
- *   raw-emails/source=x-sense/received_date=YYYY-MM-DD/raw_sha256=<sha>.eml
- *   csv/source=x-sense/export_date=YYYY-MM-DD/attachment_sha256=<sha>/<safe_filename>.csv
- *   manifests/ingest/source=x-sense/received_date=YYYY-MM-DD/raw_sha256=<sha>.json
- *   manifests/rejections/source=x-sense/received_date=YYYY-MM-DD/raw_sha256=<sha>.json
+ *   ingest/x-sense/messages/received_date=YYYY-MM-DD/sha256=<sha>.eml
+ *   ingest/x-sense/attachments/export_date=YYYY-MM-DD/sha256=<sha>/<safe_filename>.csv
+ *   ingest/x-sense/outcomes/received_date=YYYY-MM-DD/sha256=<sha>.json
  */
 
 export const PARSER_VERSION = "basement_email_ingest_worker.v1";
@@ -45,15 +44,15 @@ export interface AttachmentOutcome {
   status: AttachmentStatus;
   row_count: number;
   reason: string;
-  csv_object_key: string | null;
+  attachment_object_key: string | null;
 }
 
 export interface IngestOutcome {
   status: EmailStatus;
   reason: string;
-  raw_object_key: string;
-  raw_sha256: string;
-  manifest_object_key: string;
+  message_object_key: string;
+  message_sha256: string;
+  outcome_object_key: string;
   attachments: AttachmentOutcome[];
   validation_errors: string[];
 }
@@ -86,29 +85,28 @@ export async function ingestRawEmail(
   }
 
   const receivedDate = email === null ? utcDate(now) : receivedDateFor(email, now);
-  const rawObjectKey =
-    `raw-emails/source=${SOURCE}/received_date=${receivedDate}/raw_sha256=${rawSha256}.eml`;
+  const messageObjectKey = messageKey(receivedDate, rawSha256);
 
-  if ((await bucket.head(rawObjectKey)) !== null) {
+  if ((await bucket.head(messageObjectKey)) !== null) {
     return {
       status: "duplicate_raw_sha256",
       reason: "raw email bytes already stored under this content-addressed key",
-      raw_object_key: rawObjectKey,
-      raw_sha256: rawSha256,
-      manifest_object_key: manifestObjectKey("ingest", receivedDate, rawSha256),
+      message_object_key: messageObjectKey,
+      message_sha256: rawSha256,
+      outcome_object_key: outcomeKey(receivedDate, rawSha256),
       attachments: [],
       validation_errors: [],
     };
   }
 
-  await putIfAbsent(bucket, rawObjectKey, copyBytes(rawBytes), "message/rfc822");
+  await putIfAbsent(bucket, messageObjectKey, copyBytes(rawBytes), "message/rfc822");
 
   if (email === null) {
     return writeRejection(bucket, {
       status: "invalid_raw_email",
       reason: parseError,
-      rawObjectKey,
-      rawSha256,
+      messageObjectKey,
+      messageSha256: rawSha256,
       receivedDate,
       headers: {},
       attachments: [],
@@ -161,8 +159,8 @@ export async function ingestRawEmail(
     return writeRejection(bucket, {
       status,
       reason: validationErrors[0],
-      rawObjectKey,
-      rawSha256,
+      messageObjectKey,
+      messageSha256: rawSha256,
       receivedDate,
       headers,
       attachments: validations.map(({ candidate, contentSha256, validation }) => ({
@@ -174,7 +172,7 @@ export async function ingestRawEmail(
           validation.status === "valid"
             ? "valid CSV in rejected email; not extracted"
             : validation.reason,
-        csv_object_key: null,
+        attachment_object_key: null,
       })),
       validationErrors,
     });
@@ -182,10 +180,17 @@ export async function ingestRawEmail(
 
   const attachments: AttachmentOutcome[] = [];
   for (const { candidate, contentSha256, validation } of validations) {
-    const csvObjectKey =
-      `csv/source=${SOURCE}/export_date=${validation.exportDate}/` +
-      `attachment_sha256=${contentSha256}/${safeFilename(candidate.filename)}`;
-    const written = await putIfAbsent(bucket, csvObjectKey, copyBytes(candidate.content), "text/csv");
+    const attachmentKey = attachmentObjectKey(
+      validation.exportDate!,
+      contentSha256,
+      safeFilename(candidate.filename),
+    );
+    const written = await putIfAbsent(
+      bucket,
+      attachmentKey,
+      copyBytes(candidate.content),
+      "text/csv",
+    );
     attachments.push({
       filename: candidate.filename,
       content_sha256: contentSha256,
@@ -194,24 +199,24 @@ export async function ingestRawEmail(
       reason: written
         ? "first-seen valid CSV content"
         : "valid CSV bytes already extracted from another email",
-      csv_object_key: written ? csvObjectKey : null,
+      attachment_object_key: written ? attachmentKey : null,
     });
   }
 
-  const manifestKey = manifestObjectKey("ingest", receivedDate, rawSha256);
+  const outcomeObjectKey = outcomeKey(receivedDate, rawSha256);
   const outcome: IngestOutcome = {
     status: "accepted",
     reason: "processed CSV attachment candidates",
-    raw_object_key: rawObjectKey,
-    raw_sha256: rawSha256,
-    manifest_object_key: manifestKey,
+    message_object_key: messageObjectKey,
+    message_sha256: rawSha256,
+    outcome_object_key: outcomeObjectKey,
     attachments,
     validation_errors: [],
   };
   await putIfAbsent(
     bucket,
-    manifestKey,
-    manifestJson(outcome, headers, receivedDate),
+    outcomeObjectKey,
+    outcomeJson(outcome, headers, receivedDate),
     "application/json",
   );
   return outcome;
@@ -220,8 +225,8 @@ export async function ingestRawEmail(
 interface RejectionInput {
   status: EmailStatus;
   reason: string;
-  rawObjectKey: string;
-  rawSha256: string;
+  messageObjectKey: string;
+  messageSha256: string;
   receivedDate: string;
   headers: Record<string, string>;
   attachments: AttachmentOutcome[];
@@ -229,53 +234,61 @@ interface RejectionInput {
 }
 
 async function writeRejection(bucket: R2Bucket, input: RejectionInput): Promise<IngestOutcome> {
-  const manifestKey = manifestObjectKey("rejections", input.receivedDate, input.rawSha256);
+  const outcomeObjectKey = outcomeKey(input.receivedDate, input.messageSha256);
   const outcome: IngestOutcome = {
     status: input.status,
     reason: input.reason,
-    raw_object_key: input.rawObjectKey,
-    raw_sha256: input.rawSha256,
-    manifest_object_key: manifestKey,
+    message_object_key: input.messageObjectKey,
+    message_sha256: input.messageSha256,
+    outcome_object_key: outcomeObjectKey,
     attachments: input.attachments,
     validation_errors: input.validationErrors,
   };
   await putIfAbsent(
     bucket,
-    manifestKey,
-    manifestJson(outcome, input.headers, input.receivedDate),
+    outcomeObjectKey,
+    outcomeJson(outcome, input.headers, input.receivedDate),
     "application/json",
   );
   return outcome;
 }
 
-function manifestObjectKey(
-  kind: "ingest" | "rejections",
-  receivedDate: string,
-  rawSha256: string,
-): string {
-  return `manifests/${kind}/source=${SOURCE}/received_date=${receivedDate}/raw_sha256=${rawSha256}.json`;
+export function messageKey(receivedDate: string, sha256: string): string {
+  return `ingest/${SOURCE}/messages/received_date=${receivedDate}/sha256=${sha256}.eml`;
 }
 
-function manifestJson(
+export function attachmentObjectKey(
+  exportDate: string,
+  sha256: string,
+  filename: string,
+): string {
+  return `ingest/${SOURCE}/attachments/export_date=${exportDate}/sha256=${sha256}/${filename}`;
+}
+
+export function outcomeKey(receivedDate: string, sha256: string): string {
+  return `ingest/${SOURCE}/outcomes/received_date=${receivedDate}/sha256=${sha256}.json`;
+}
+
+function outcomeJson(
   outcome: IngestOutcome,
   headers: Record<string, string>,
   receivedDate: string,
 ): string {
-  const manifest: Record<string, unknown> = {
+  const outcomeRecord: Record<string, unknown> = {
     attachments: outcome.attachments,
     headers,
     parser_version: PARSER_VERSION,
-    raw_object_key: outcome.raw_object_key,
-    raw_sha256: outcome.raw_sha256,
+    message_object_key: outcome.message_object_key,
+    message_sha256: outcome.message_sha256,
     reason: outcome.reason,
     received_date: receivedDate,
     source: SOURCE,
     status: outcome.status,
   };
   if (outcome.validation_errors.length > 0) {
-    manifest.validation_errors = outcome.validation_errors;
+    outcomeRecord.validation_errors = outcome.validation_errors;
   }
-  return stableJson(manifest);
+  return stableJson(outcomeRecord);
 }
 
 /** JSON with lexicographically sorted keys and 2-space indent, like Python's

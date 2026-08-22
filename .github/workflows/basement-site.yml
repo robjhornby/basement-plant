@@ -74,7 +74,7 @@ jobs:
           AWS_REQUEST_CHECKSUM_CALCULATION: when_required
           AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
         run: >
-          aws s3 sync build/curated-r2-parquet "s3://$R2_BUCKET/parquet"
+          aws s3 sync build/curated-r2-parquet "s3://$R2_BUCKET/datasets"
           --delete
           --endpoint-url "$R2_ENDPOINT_URL" --no-progress
 
@@ -82,7 +82,7 @@ jobs:
         run: >
           uv run basement --reuse-curated
           --output-dir build/gha-site/site
-          --curated-data-dir "s3://$R2_BUCKET/parquet"
+          --curated-data-dir "s3://$R2_BUCKET/datasets"
           --timings-dir build/timings
 
       - name: Publish site HTML to R2

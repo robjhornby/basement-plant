@@ -65,12 +65,9 @@ uv run basement ingest-emails \
   --object-store-dir build/basement-ingest-objects
 ```
 
-The command scans for `.eml` files recursively, copies raw messages under
-`raw-emails/source=x-sense/`, extracts first-seen valid CSV attachments under
-`csv/source=x-sense/`, and writes ingest manifests under `manifests/ingest/`.
-If you download objects from R2 with their key structure already present under
-the input directory, pass `--raw-object-key-prefix ""` to preserve those local
-relative paths as object keys.
+The command scans for `.eml` files recursively and writes the same semantic ingest evidence as
+the Email Worker under `ingest/x-sense/`: content-addressed messages, first-seen valid
+attachments, and processing outcomes.
 
 The GitHub Action exposes create-only event logging. To stage an update or deletion locally,
 use the one-off revision script; it writes an immutable JSON record and prints its R2 object key:

@@ -13,12 +13,12 @@ import realEmailText from "@repo-data/email/Your Temperature and Relative Humidi
 // (src/basement_analysis/raw_email_ingest.py). The Worker must produce the
 // same content hashes, object keys, and manifest fields.
 const RAW_SHA256 = "2fad5a25d4c54ca381e4e7e3e3462ec9acd204e1b28d18652e6c877660c4fe7d";
-const RAW_OBJECT_KEY = `raw-emails/source=x-sense/received_date=2026-07-04/raw_sha256=${RAW_SHA256}.eml`;
-const MANIFEST_OBJECT_KEY = `manifests/ingest/source=x-sense/received_date=2026-07-04/raw_sha256=${RAW_SHA256}.json`;
+const MESSAGE_OBJECT_KEY = `ingest/x-sense/messages/received_date=2026-07-04/sha256=${RAW_SHA256}.eml`;
+const OUTCOME_OBJECT_KEY = `ingest/x-sense/outcomes/received_date=2026-07-04/sha256=${RAW_SHA256}.json`;
 const EXPECTED_CSV_OBJECT_KEYS = [
-  "csv/source=x-sense/export_date=2026-07-03/attachment_sha256=a4ae92685fd8618a341c8b479fb8c3573e71d7875740af29fb92ee052596d29a/Thermo-hygrometer_Export_Data_20260703.csv",
-  "csv/source=x-sense/export_date=2026-07-03/attachment_sha256=770af430dac2e15b1225e84ec021322c817fef489b7f3111174463e50fe411b9/Thermo-hygrometer_2_Export_Data_20260703.csv",
-  "csv/source=x-sense/export_date=2026-07-03/attachment_sha256=9eef1608890e864667564b3881b05f0433718fab660a3ad835f13ac7cc7c9c9a/Thermo-hygrometer_3_Export_Data_20260703.csv",
+  "ingest/x-sense/attachments/export_date=2026-07-03/sha256=a4ae92685fd8618a341c8b479fb8c3573e71d7875740af29fb92ee052596d29a/Thermo-hygrometer_Export_Data_20260703.csv",
+  "ingest/x-sense/attachments/export_date=2026-07-03/sha256=770af430dac2e15b1225e84ec021322c817fef489b7f3111174463e50fe411b9/Thermo-hygrometer_2_Export_Data_20260703.csv",
+  "ingest/x-sense/attachments/export_date=2026-07-03/sha256=9eef1608890e864667564b3881b05f0433718fab660a3ad835f13ac7cc7c9c9a/Thermo-hygrometer_3_Export_Data_20260703.csv",
 ];
 
 const realEmailBytes = new TextEncoder().encode(realEmailText);
@@ -79,9 +79,9 @@ describe("accept path with the real X-Sense sample", () => {
     const outcome = await ingestRawEmail(realEmailBytes, env.PIPELINE_BUCKET);
 
     expect(outcome.status).toBe("accepted");
-    expect(outcome.raw_object_key).toBe(RAW_OBJECT_KEY);
-    expect(outcome.manifest_object_key).toBe(MANIFEST_OBJECT_KEY);
-    expect(outcome.attachments.map((attachment) => attachment.csv_object_key)).toEqual(
+    expect(outcome.message_object_key).toBe(MESSAGE_OBJECT_KEY);
+    expect(outcome.outcome_object_key).toBe(OUTCOME_OBJECT_KEY);
+    expect(outcome.attachments.map((attachment) => attachment.attachment_object_key)).toEqual(
       EXPECTED_CSV_OBJECT_KEYS,
     );
     expect(outcome.attachments.map((attachment) => attachment.status)).toEqual([
@@ -93,7 +93,7 @@ describe("accept path with the real X-Sense sample", () => {
       1440, 1440, 1440,
     ]);
 
-    const rawObject = await env.PIPELINE_BUCKET.get(RAW_OBJECT_KEY);
+    const rawObject = await env.PIPELINE_BUCKET.get(MESSAGE_OBJECT_KEY);
     expect(rawObject).not.toBeNull();
     expect(new Uint8Array(await rawObject!.arrayBuffer())).toEqual(realEmailBytes);
 
@@ -101,14 +101,14 @@ describe("accept path with the real X-Sense sample", () => {
       expect(await env.PIPELINE_BUCKET.head(csvObjectKey)).not.toBeNull();
     }
 
-    const manifestObject = await env.PIPELINE_BUCKET.get(MANIFEST_OBJECT_KEY);
+    const manifestObject = await env.PIPELINE_BUCKET.get(OUTCOME_OBJECT_KEY);
     expect(manifestObject).not.toBeNull();
     const manifest = (await manifestObject!.json()) as Record<string, unknown>;
     expect(manifest.status).toBe("accepted");
     expect(manifest.source).toBe("x-sense");
     expect(manifest.received_date).toBe("2026-07-04");
-    expect(manifest.raw_sha256).toBe(RAW_SHA256);
-    expect(manifest.raw_object_key).toBe(RAW_OBJECT_KEY);
+    expect(manifest.message_sha256).toBe(RAW_SHA256);
+    expect(manifest.message_object_key).toBe(MESSAGE_OBJECT_KEY);
     expect(manifest.parser_version).toBe("basement_email_ingest_worker.v1");
     const headers = manifest.headers as Record<string, string>;
     expect(headers.message_id).toBe(
@@ -118,15 +118,17 @@ describe("accept path with the real X-Sense sample", () => {
     const attachments = manifest.attachments as Array<Record<string, unknown>>;
     expect(attachments).toHaveLength(3);
     expect(attachments[0].filename).toBe("Thermo-hygrometer_Export Data_20260703.csv");
-    expect(attachments[0].csv_object_key).toBe(EXPECTED_CSV_OBJECT_KEYS[0]);
+    expect(attachments[0].attachment_object_key).toBe(EXPECTED_CSV_OBJECT_KEYS[0]);
   });
 
   it("ingests through the Worker email() handler", async () => {
     await worker.email(emailMessage(realEmailBytes), env);
 
-    expect(await env.PIPELINE_BUCKET.head(RAW_OBJECT_KEY)).not.toBeNull();
-    expect(await env.PIPELINE_BUCKET.head(MANIFEST_OBJECT_KEY)).not.toBeNull();
-    expect(await listKeys("csv/")).toEqual([...EXPECTED_CSV_OBJECT_KEYS].sort());
+    expect(await env.PIPELINE_BUCKET.head(MESSAGE_OBJECT_KEY)).not.toBeNull();
+    expect(await env.PIPELINE_BUCKET.head(OUTCOME_OBJECT_KEY)).not.toBeNull();
+    expect(await listKeys("ingest/x-sense/attachments/")).toEqual(
+      [...EXPECTED_CSV_OBJECT_KEYS].sort(),
+    );
   });
 
   it("treats redelivery of identical raw bytes as a no-op duplicate", async () => {
@@ -136,7 +138,7 @@ describe("accept path with the real X-Sense sample", () => {
     expect(first.status).toBe("accepted");
     expect(second.status).toBe("duplicate_raw_sha256");
     expect(second.attachments).toEqual([]);
-    expect(await listKeys("manifests/")).toEqual([MANIFEST_OBJECT_KEY]);
+    expect(await listKeys("ingest/x-sense/outcomes/")).toEqual([OUTCOME_OBJECT_KEY]);
   });
 
   it("dedupes identical CSV content from a distinct raw email (e.g. a forward)", async () => {
@@ -148,19 +150,21 @@ describe("accept path with the real X-Sense sample", () => {
 
     expect(original.status).toBe("accepted");
     expect(forwarded.status).toBe("accepted");
-    expect(forwarded.raw_sha256).not.toBe(original.raw_sha256);
+    expect(forwarded.message_sha256).not.toBe(original.message_sha256);
     expect(forwarded.attachments.map((attachment) => attachment.status)).toEqual([
       "duplicate_content_hash",
       "duplicate_content_hash",
       "duplicate_content_hash",
     ]);
-    expect(forwarded.attachments.map((attachment) => attachment.csv_object_key)).toEqual([
+    expect(forwarded.attachments.map((attachment) => attachment.attachment_object_key)).toEqual([
       null,
       null,
       null,
     ]);
-    expect(await listKeys("csv/")).toEqual([...EXPECTED_CSV_OBJECT_KEYS].sort());
-    expect((await listKeys("manifests/ingest/")).length).toBe(2);
+    expect(await listKeys("ingest/x-sense/attachments/")).toEqual(
+      [...EXPECTED_CSV_OBJECT_KEYS].sort(),
+    );
+    expect((await listKeys("ingest/x-sense/outcomes/")).length).toBe(2);
   });
 });
 
@@ -173,18 +177,17 @@ describe("reject paths", () => {
     expect(outcome.validation_errors.join("\n")).toContain(
       "subject does not match accepted X-Sense pattern",
     );
-    expect(await env.PIPELINE_BUCKET.head(outcome.raw_object_key)).not.toBeNull();
-    expect(outcome.manifest_object_key).toBe(
-      `manifests/rejections/source=x-sense/received_date=2026-07-04/raw_sha256=${outcome.raw_sha256}.json`,
+    expect(await env.PIPELINE_BUCKET.head(outcome.message_object_key)).not.toBeNull();
+    expect(outcome.outcome_object_key).toBe(
+      `ingest/x-sense/outcomes/received_date=2026-07-04/sha256=${outcome.message_sha256}.json`,
     );
 
-    const manifestObject = await env.PIPELINE_BUCKET.get(outcome.manifest_object_key);
+    const manifestObject = await env.PIPELINE_BUCKET.get(outcome.outcome_object_key);
     expect(manifestObject).not.toBeNull();
     const manifest = (await manifestObject!.json()) as Record<string, unknown>;
     expect(manifest.status).toBe("subject_mismatch");
     expect(manifest.validation_errors).toBeInstanceOf(Array);
-    expect(await listKeys("manifests/ingest/")).toEqual([]);
-    expect(await listKeys("csv/")).toEqual([]);
+    expect(await listKeys("ingest/x-sense/attachments/")).toEqual([]);
   });
 
   it("rejects an X-Sense-looking email whose CSV attachment misses required columns", async () => {
@@ -207,8 +210,8 @@ describe("reject paths", () => {
       "invalid_csv",
       "invalid_csv",
     ]);
-    expect(await listKeys("csv/")).toEqual([]);
-    expect(await listKeys("manifests/rejections/")).toEqual([outcome.manifest_object_key]);
+    expect(await listKeys("ingest/x-sense/attachments/")).toEqual([]);
+    expect(await listKeys("ingest/x-sense/outcomes/")).toEqual([outcome.outcome_object_key]);
   });
 
   it("rejects an unexpected CSV attachment count without extracting", async () => {
@@ -224,7 +227,7 @@ describe("reject paths", () => {
     expect(outcome.status).toBe("unexpected_csv_attachment_count");
     expect(outcome.validation_errors.join("\n")).toContain("expected 3 CSV attachments, found 1");
     expect(outcome.attachments.map((attachment) => attachment.status)).toEqual(["skipped"]);
-    expect(await listKeys("csv/")).toEqual([]);
-    expect(await listKeys("manifests/rejections/")).toEqual([outcome.manifest_object_key]);
+    expect(await listKeys("ingest/x-sense/attachments/")).toEqual([]);
+    expect(await listKeys("ingest/x-sense/outcomes/")).toEqual([outcome.outcome_object_key]);
   });
 });

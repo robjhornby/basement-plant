@@ -2,16 +2,15 @@
 
 TypeScript Email Worker that receives the daily X-Sense CSV export email via Cloudflare Email
 Routing and lands it in the private `basement-pipeline` R2 bucket using the same object-key layout
-and manifest shape as the Python batch parser (`src/basement_analysis/raw_email_ingest.py`), so
+and outcome shape as the Python batch parser (`src/basement_analysis/raw_email_ingest.py`), so
 hosted and local ingest are interchangeable.
 
 ## What it writes
 
 ```text
-raw-emails/source=x-sense/received_date=YYYY-MM-DD/raw_sha256=<raw_sha256>.eml
-csv/source=x-sense/export_date=YYYY-MM-DD/attachment_sha256=<csv_sha256>/<safe_filename>.csv
-manifests/ingest/source=x-sense/received_date=YYYY-MM-DD/raw_sha256=<raw_sha256>.json
-manifests/rejections/source=x-sense/received_date=YYYY-MM-DD/raw_sha256=<raw_sha256>.json
+ingest/x-sense/messages/received_date=YYYY-MM-DD/sha256=<message_sha256>.eml
+ingest/x-sense/attachments/export_date=YYYY-MM-DD/sha256=<attachment_sha256>/<safe_filename>.csv
+ingest/x-sense/outcomes/received_date=YYYY-MM-DD/sha256=<message_sha256>.json
 ```
 
 Behavior (see `src/ingest.ts`):
@@ -22,20 +21,18 @@ Behavior (see `src/ingest.ts`):
   shape: exact subject, exactly three CSV attachments, and each CSV must contain the
   `Time`, `Temperature_Celsius`, and `Relative Humidity_Percent` columns with no blank required
   values.
-- Accepted emails get content-addressed CSV objects plus an ingest manifest. Anything else gets a
-  rejection manifest (with `validation_errors`) under `manifests/rejections/` — the SMTP delivery
+- Accepted emails get content-addressed attachments plus an accepted outcome. Anything else gets a
+  rejection outcome (with `validation_errors`) in the same outcome tree — the SMTP delivery
   is still accepted, nothing is bounced back to X-Sense/Gmail, and the raw `.eml` allows a later
   Python backfill (`uv run basement ingest-emails`) to reprocess.
 - Idempotence is content-addressed: redelivery of identical raw bytes is a no-op
   (`duplicate_raw_sha256`), and identical CSV content arriving in a different raw email (for
   example a Gmail forward) is recorded as `duplicate_content_hash` without rewriting objects.
-  There is no database; manifests are the audit state.
+  There is no database; outcomes are the audit state.
 
-Known, intentional divergence from the Python batch parser: the Worker is stricter (subject and
-attachment-count checks) and writes rejects to `manifests/rejections/` where the Python backfill
-records every email under `manifests/ingest/`. Object keys and manifest fields are otherwise
-identical; the accept-path tests assert key-for-key equality against output captured from the
-Python parser on the same sample email.
+The Worker is intentionally stricter than the Python batch parser about the subject and attachment
+count. Their accepted path uses identical keys and outcome fields; contract tests compare both
+implementations against the same sample email.
 
 ## Local development and tests
 
@@ -95,5 +92,5 @@ required — the Worker only uses the R2 binding.
    emails to that address (Gmail keeps its copy for recovery).
 
 4. Verify: send/forward one export email, watch `npx wrangler tail basement-email-ingest` for the
-   `email_ingest` log line, and confirm the manifest object exists (dashboard, or
-   `npx wrangler r2 object get basement-pipeline/<manifest key> --pipe`).
+   `email_ingest` log line, and confirm the outcome exists (dashboard, or
+   `npx wrangler r2 object get basement-pipeline/<outcome key> --pipe`).

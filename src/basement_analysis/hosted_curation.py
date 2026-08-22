@@ -18,6 +18,7 @@ from basement_analysis.curated_dataset import (
     r2_events_glob,
     write_curated_dataset,
 )
+from basement_analysis.object_layout import DATASETS_PREFIX, INGEST_OUTCOME_GLOB
 from basement_analysis.observability import PhaseRecorder
 from basement_analysis.r2_access import configure_r2_access
 from basement_analysis.static_site import (
@@ -33,8 +34,6 @@ from basement_analysis.summaries import RainReading, SensorReading, WeatherHour
 # of days idempotent, so a CSV that straddles the boundary or lands a little late is never
 # dropped. This is the one tunable.
 OVERLAP_DAYS = 2
-
-MANIFEST_GLOB = "manifests/ingest/**/*.json"
 
 
 class HostedCurationResult(BaseModel):
@@ -58,7 +57,7 @@ def default_existing_curated_dataset_root() -> str:
         raise ValueError(
             "Default hosted curation needs R2_BUCKET, or pass --existing-curated-data-dir."
         )
-    return f"s3://{bucket_name}/parquet"
+    return f"s3://{bucket_name}/{DATASETS_PREFIX}"
 
 
 def sensor_reading_watermark(
@@ -138,9 +137,9 @@ def accepted_csv_keys_from_manifest(manifest: dict[str, object]) -> list[str]:
         attachment_values = cast(dict[object, object], attachment)
         if attachment_values.get("status") != "extracted":
             continue
-        csv_object_key = attachment_values.get("csv_object_key")
-        if isinstance(csv_object_key, str) and csv_object_key:
-            keys.append(csv_object_key)
+        attachment_object_key = attachment_values.get("attachment_object_key")
+        if isinstance(attachment_object_key, str) and attachment_object_key:
+            keys.append(attachment_object_key)
     return keys
 
 
@@ -163,7 +162,7 @@ def accepted_csv_object_keys(
     at or after the cutoff need reading — received_date tracks export_date within a day, so no
     manifest referencing an in-window CSV is skipped. A `None` cutoff reads every manifest.
     """
-    manifest_paths = list_object_paths(connection, object_store_root, MANIFEST_GLOB)
+    manifest_paths = list_object_paths(connection, object_store_root, INGEST_OUTCOME_GLOB)
     selected_manifest_paths = [
         path
         for path in manifest_paths

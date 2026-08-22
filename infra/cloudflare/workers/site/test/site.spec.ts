@@ -135,11 +135,11 @@ describe("site Worker", () => {
       env,
     );
     const missingResponse = await worker.fetch(
-      new Request("https://example.test/basement/raw-emails/message.eml"),
+      new Request("https://example.test/basement/ingest/x-sense/messages/message.eml"),
       env,
     );
     const outsideBasePathResponse = await worker.fetch(
-      new Request("https://example.test/raw-emails/message.eml"),
+      new Request("https://example.test/ingest/x-sense/messages/message.eml"),
       env,
     );
 

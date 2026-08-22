@@ -8,10 +8,9 @@ GitHub Actions providing the free-plan Python analysis runner:
 ```text
 X-Sense daily CSV email
   -> Cloudflare Email Routing / Email Worker
-  -> R2 raw email object
-  -> R2 extracted CSV objects and ingest manifests
+  -> R2 ingest evidence
   -> Python parser/analysis path
-  -> R2 derived Parquet objects
+  -> R2 analytical datasets
   -> GitHub Actions Python/uv analysis job
   -> R2 generated static site objects
   -> Cloudflare Worker route
@@ -25,11 +24,9 @@ daily export. From the ingest address onward, the durable pipeline should be Clo
 
 Use a private pipeline R2 bucket for ingest and analytical data:
 
-- `raw-emails/`: original received `.eml` objects.
-- `csv/`: extracted CSV attachments, named by date, sensor identity, and content hash.
-- `parquet/`: derived Parquet files used by analysis.
-- `manifests/`: small JSON manifests for idempotence and audit state if deterministic object keys
-  are not enough.
+- `ingest/`: immutable messages, extracted attachments, and processing outcomes by source.
+- `events/`: canonical immutable owner-entered event revisions.
+- `datasets/`: reproducible analytical datasets used by analysis and publication.
 
 Use a separate private site R2 bucket for publication:
 
@@ -58,7 +55,7 @@ Cloudflare Email Routing rule
   -> email-ingest Worker
   -> raw .eml object
   -> extracted CSV attachment objects
-  -> ingest manifest JSON object
+  -> processing outcome JSON object
 ```
 
 The Email Worker should parse the raw MIME message with `postal-mime`, validate the current X-Sense
@@ -68,28 +65,27 @@ the Python parser/analysis path so local and hosted processing stay equivalent.
 Recommended object keys:
 
 ```text
-raw-emails/source=x-sense/received_date=YYYY-MM-DD/raw_sha256=<raw_sha256>.eml
-csv/source=x-sense/export_date=YYYY-MM-DD/attachment_sha256=<csv_sha256>/<safe_filename>.csv
-manifests/ingest/source=x-sense/received_date=YYYY-MM-DD/raw_sha256=<raw_sha256>.json
-manifests/rejections/source=x-sense/received_date=YYYY-MM-DD/raw_sha256=<raw_sha256>.json
-parquet/<existing local curated dataset layout>
+ingest/x-sense/messages/received_date=YYYY-MM-DD/sha256=<message_sha256>.eml
+ingest/x-sense/attachments/export_date=YYYY-MM-DD/sha256=<attachment_sha256>/<safe_filename>.csv
+ingest/x-sense/outcomes/received_date=YYYY-MM-DD/sha256=<message_sha256>.json
+events/year=YYYY/<revision_id>.json
+datasets/<analytical-domain>/<partitions>/part-00000.parquet
 ```
 
-The manifest should store the raw object key, raw SHA-256, message headers used for audit and
+The outcome should store the message object key, message SHA-256, headers used for audit and
 dedupe (`Message-ID`, `Date`, `From`, `To`, `Subject`), attachment keys and SHA-256 values, parser
-version, validation result, and any rejection reason. R2 object custom metadata may duplicate small
-lookup fields, but the JSON manifest is the durable audit record.
+version, validation result, and any rejection reason. The JSON outcome is the durable audit record.
 
 Use content-addressed keys and R2 conditional writes for idempotence. Duplicate raw emails and
-duplicate attachments should become no-op writes plus manifest evidence, not database rows. If a
-later hosted trigger needs coordination, prefer scanning manifests or adding a narrow queue before
+duplicate attachments should become no-op writes plus outcome evidence, not database rows. If a
+later hosted trigger needs coordination, prefer scanning outcomes or adding a narrow queue before
 adding D1 or Durable Objects.
 
 ## Execution Shape
 
 The hosted analysis job is a GitHub Actions workflow in the public
 `robjhornby/basement-plant` repository. It runs `uv run basement --reuse-curated` with DuckDB
-reading `s3://basement-pipeline/parquet` directly through R2's S3-compatible endpoint, then writes
+reading `s3://basement-pipeline/datasets` directly through R2's S3-compatible endpoint, then writes
 the rendered `index.html` file to the dedicated `basement-site` bucket using R2 S3-compatible
 credentials scoped to the pipeline and site buckets. The local physics/metrology report remains a
 private opt-in render and is not published.

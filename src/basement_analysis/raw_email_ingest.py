@@ -15,8 +15,14 @@ from typing import cast
 
 from pydantic import BaseModel, ConfigDict
 
+from basement_analysis.object_layout import (
+    INGEST_SOURCE,
+    attachment_object_key,
+    message_object_key,
+    outcome_object_key,
+)
+
 PARSER_VERSION = "basement_analysis.raw_email_ingest.v1"
-X_SENSE_RAW_OBJECT_KEY_PREFIX = "raw-emails/source=x-sense"
 REQUIRED_SENSOR_COLUMNS = (
     "Time",
     "Temperature_Celsius",
@@ -28,7 +34,6 @@ class RawEmailInput(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     path: Path
-    object_key: str
 
 
 class CsvValidationResult(BaseModel):
@@ -48,18 +53,18 @@ class AttachmentResult(BaseModel):
     status: str
     row_count: int
     reason: str
-    csv_object_key: str | None
+    attachment_object_key: str | None
 
 
 class EmailIngestResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    raw_object_key: str
-    raw_sha256: str
+    message_object_key: str
+    message_sha256: str
     message_id: str
     status: str
     reason: str
-    manifest_object_key: str
+    outcome_object_key: str
     attachment_results: tuple[AttachmentResult, ...]
 
 
@@ -72,19 +77,18 @@ class IngestState(BaseModel):
 def process_raw_email_batch(
     raw_email_dir: Path,
     object_store_dir: Path,
-    raw_object_key_prefix: str = X_SENSE_RAW_OBJECT_KEY_PREFIX,
 ) -> tuple[EmailIngestResult, ...]:
     """Process local raw emails into an R2-shaped object tree."""
     state = load_ingest_state(object_store_dir)
     results: list[EmailIngestResult] = []
-    for raw_email_input in iter_raw_email_inputs(raw_email_dir, raw_object_key_prefix):
+    for raw_email_input in iter_raw_email_inputs(raw_email_dir):
         result = process_raw_email(
             raw_email_input=raw_email_input,
             object_store_dir=object_store_dir,
             state=state,
         )
         results.append(result)
-        state.raw_sha256_values.add(result.raw_sha256)
+        state.raw_sha256_values.add(result.message_sha256)
         if result.status not in {"duplicate_raw_sha256", "invalid_raw_email"}:
             state.message_ids.add(result.message_id)
         for attachment_result in result.attachment_results:
@@ -93,40 +97,18 @@ def process_raw_email_batch(
     return tuple(results)
 
 
-def iter_raw_email_inputs(
-    raw_email_dir: Path, raw_object_key_prefix: str
-) -> tuple[RawEmailInput, ...]:
-    normalized_prefix = raw_object_key_prefix.strip("/")
+def iter_raw_email_inputs(raw_email_dir: Path) -> tuple[RawEmailInput, ...]:
     raw_email_paths = sorted(path for path in raw_email_dir.glob("**/*.eml") if path.is_file())
-    return tuple(
-        RawEmailInput(
-            path=raw_email_path,
-            object_key=object_key_for(
-                raw_email_dir=raw_email_dir,
-                email_path=raw_email_path,
-                raw_object_key_prefix=normalized_prefix,
-            ),
-        )
-        for raw_email_path in raw_email_paths
-    )
-
-
-def object_key_for(raw_email_dir: Path, email_path: Path, raw_object_key_prefix: str) -> str:
-    relative_path = email_path.relative_to(raw_email_dir).as_posix()
-    if not raw_object_key_prefix:
-        return relative_path
-    if relative_path == raw_object_key_prefix or relative_path.startswith(
-        f"{raw_object_key_prefix}/"
-    ):
-        return relative_path
-    return f"{raw_object_key_prefix}/{relative_path}"
+    return tuple(RawEmailInput(path=raw_email_path) for raw_email_path in raw_email_paths)
 
 
 def load_ingest_state(object_store_dir: Path) -> IngestState:
     state = IngestState(raw_sha256_values=set(), message_ids=set(), csv_sha256_values=set())
-    for manifest_path in sorted((object_store_dir / "manifests" / "ingest").glob("**/*.json")):
+    for manifest_path in sorted(
+        (object_store_dir / "ingest" / INGEST_SOURCE / "outcomes").glob("**/*.json")
+    ):
         manifest = cast(dict[str, object], json.loads(manifest_path.read_text(encoding="utf-8")))
-        raw_sha256 = manifest.get("raw_sha256")
+        raw_sha256 = manifest.get("message_sha256")
         if isinstance(raw_sha256, str):
             state.raw_sha256_values.add(raw_sha256)
         headers = manifest.get("headers")
@@ -155,21 +137,20 @@ def process_raw_email(
 ) -> EmailIngestResult:
     raw_bytes = raw_email_input.path.read_bytes()
     raw_sha256 = sha256_hex(raw_bytes)
-    raw_object_key = raw_email_input.object_key
-    copy_raw_email_object(raw_email_input.path, object_store_dir / raw_object_key, raw_bytes)
-
     try:
         message = BytesParser(policy=default).parsebytes(raw_bytes)
     except ValueError as error:
         message_id = f"unparseable:{raw_sha256}"
         received_date = date.today()
+        message_key = message_object_key(received_date, raw_sha256)
+        copy_raw_email_object(raw_email_input.path, object_store_dir / message_key, raw_bytes)
         result = EmailIngestResult(
-            raw_object_key=raw_object_key,
-            raw_sha256=raw_sha256,
+            message_object_key=message_key,
+            message_sha256=raw_sha256,
             message_id=message_id,
             status="invalid_raw_email",
             reason=f"could not parse raw email: {error}",
-            manifest_object_key=manifest_object_key(received_date, raw_sha256),
+            outcome_object_key=outcome_object_key(received_date, raw_sha256),
             attachment_results=(),
         )
         write_manifest(object_store_dir, result, headers={}, received_date=received_date)
@@ -177,28 +158,30 @@ def process_raw_email(
 
     message_id = normalized_message_id(message, raw_sha256)
     received_date = received_date_for(message)
-    manifest_key = manifest_object_key(received_date, raw_sha256)
+    message_key = message_object_key(received_date, raw_sha256)
+    copy_raw_email_object(raw_email_input.path, object_store_dir / message_key, raw_bytes)
+    outcome_key = outcome_object_key(received_date, raw_sha256)
     headers = selected_headers(message, message_id)
 
     if raw_sha256 in state.raw_sha256_values:
         return EmailIngestResult(
-            raw_object_key=raw_object_key,
-            raw_sha256=raw_sha256,
+            message_object_key=message_key,
+            message_sha256=raw_sha256,
             message_id=message_id,
             status="duplicate_raw_sha256",
             reason="raw email bytes already have an ingest manifest",
-            manifest_object_key=manifest_key,
+            outcome_object_key=outcome_key,
             attachment_results=(),
         )
 
     if message_id in state.message_ids:
         result = EmailIngestResult(
-            raw_object_key=raw_object_key,
-            raw_sha256=raw_sha256,
+            message_object_key=message_key,
+            message_sha256=raw_sha256,
             message_id=message_id,
             status="duplicate_message_id",
             reason="Message-ID already seen; treat as duplicate forward",
-            manifest_object_key=manifest_key,
+            outcome_object_key=outcome_key,
             attachment_results=(),
         )
         write_manifest(object_store_dir, result, headers=headers, received_date=received_date)
@@ -220,12 +203,12 @@ def process_raw_email(
         else "message contained no CSV attachments"
     )
     result = EmailIngestResult(
-        raw_object_key=raw_object_key,
-        raw_sha256=raw_sha256,
+        message_object_key=message_key,
+        message_sha256=raw_sha256,
         message_id=message_id,
         status=status,
         reason=reason,
-        manifest_object_key=manifest_key,
+        outcome_object_key=outcome_key,
         attachment_results=attachment_results,
     )
     write_manifest(object_store_dir, result, headers=headers, received_date=received_date)
@@ -247,7 +230,7 @@ def process_csv_attachment(
             status=validation.status,
             row_count=validation.row_count,
             reason=validation.reason,
-            csv_object_key=None,
+            attachment_object_key=None,
         )
     if content_sha256 in state.csv_sha256_values:
         return AttachmentResult(
@@ -256,7 +239,7 @@ def process_csv_attachment(
             status="duplicate_content_hash",
             row_count=validation.row_count,
             reason="valid CSV bytes already extracted from another email",
-            csv_object_key=None,
+            attachment_object_key=None,
         )
 
     export_date = validation.export_date
@@ -267,21 +250,18 @@ def process_csv_attachment(
             status="invalid_csv",
             row_count=validation.row_count,
             reason="could not derive export date from the first Time value",
-            csv_object_key=None,
+            attachment_object_key=None,
         )
 
-    csv_object_key = (
-        f"csv/source=x-sense/export_date={export_date.isoformat()}/"
-        f"attachment_sha256={content_sha256}/{safe_filename(filename)}"
-    )
-    write_object_if_absent(object_store_dir / csv_object_key, attachment_bytes)
+    attachment_key = attachment_object_key(export_date, content_sha256, safe_filename(filename))
+    write_object_if_absent(object_store_dir / attachment_key, attachment_bytes)
     return AttachmentResult(
         filename=filename,
         content_sha256=content_sha256,
         status="extracted",
         row_count=validation.row_count,
         reason="first-seen valid CSV content",
-        csv_object_key=csv_object_key,
+        attachment_object_key=attachment_key,
     )
 
 
@@ -379,13 +359,6 @@ def selected_headers(message: Message, message_id: str) -> dict[str, str]:
     return headers
 
 
-def manifest_object_key(received_date: date, raw_sha256: str) -> str:
-    return (
-        f"manifests/ingest/source=x-sense/received_date={received_date.isoformat()}/"
-        f"raw_sha256={raw_sha256}.json"
-    )
-
-
 def write_manifest(
     object_store_dir: Path,
     result: EmailIngestResult,
@@ -398,8 +371,8 @@ def write_manifest(
         "reason": result.reason,
         "source": "x-sense",
         "received_date": received_date.isoformat(),
-        "raw_object_key": result.raw_object_key,
-        "raw_sha256": result.raw_sha256,
+        "message_object_key": result.message_object_key,
+        "message_sha256": result.message_sha256,
         "headers": headers,
         "attachments": [
             {
@@ -408,13 +381,13 @@ def write_manifest(
                 "status": attachment.status,
                 "row_count": attachment.row_count,
                 "reason": attachment.reason,
-                "csv_object_key": attachment.csv_object_key,
+                "attachment_object_key": attachment.attachment_object_key,
             }
             for attachment in result.attachment_results
         ],
     }
     write_object_if_absent(
-        object_store_dir / result.manifest_object_key,
+        object_store_dir / result.outcome_object_key,
         json.dumps(manifest, indent=2, sort_keys=True).encode(),
     )
 
@@ -462,11 +435,11 @@ def print_ingest_results(results: Sequence[EmailIngestResult]) -> None:
         print("No .eml files found.")
         return
     for result in results:
-        print(f"{result.status:22} {result.raw_object_key}")
-        print(f"  manifest: {result.manifest_object_key}")
+        print(f"{result.status:22} {result.message_object_key}")
+        print(f"  outcome: {result.outcome_object_key}")
         print(f"  reason: {result.reason}")
         for attachment in result.attachment_results:
-            output = attachment.csv_object_key or "-"
+            output = attachment.attachment_object_key or "-"
             print(
                 "  "
                 f"{attachment.status:22} rows={attachment.row_count:<5} "

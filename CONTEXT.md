@@ -89,16 +89,25 @@ _Avoid_: Calibration certificate, measured calibration
 Dedicated Cloudflare Email Routing address that receives X-Sense CSV emails for automation, either directly from X-Sense or via a Gmail forwarding rule. It is separate from the user's personal mailbox and exists to hand messages to the ingestion pipeline.
 _Avoid_: Personal inbox, Gmail account
 
-**Raw email store**:
-Private immutable R2 storage of the full received email objects before parsing, used as the audit trail and backfill source for CSV extraction.
-_Avoid_: Dashboard data, normalized sensor table
+**Ingest evidence**:
+Immutable received messages, extracted attachments, and processing outcomes that preserve the
+pipeline's provenance, audit trail, and backfill source.
+_Avoid_: Raw folder, CSV folder, dashboard data
 
-**Curated object store**:
-Private R2 storage for extracted CSV attachments and derived Parquet files. It is the analytical file lake for the hosted pipeline, not a database.
-_Avoid_: Database, live warehouse
+**Canonical event store**:
+Immutable owner-entered event revisions from which the current basement event timeline is
+derived. It is the source of truth for events; analytical copies are reproducible outputs.
+_Avoid_: Event Parquet, events CSV
+
+**Analytical dataset**:
+Reproducible derived tables used by analysis and static publication. They can be rebuilt from
+ingest evidence, the canonical event store, and public upstream data.
+_Avoid_: Database, live warehouse, Parquet store
 
 **Processing state**:
-Record of which raw email objects and attachments have already been parsed, including dedupe identifiers such as R2 object key, email `Message-ID`, and attachment content hash. Prefer deriving this from deterministic R2 keys/manifests before adding a database.
+Record of which messages and attachments have already been parsed, including dedupe identifiers
+such as R2 object key, email `Message-ID`, and attachment content hash. Prefer deriving this from
+deterministic R2 keys and outcomes before adding a database.
 _Avoid_: Processed folder
 
 **Static publication artifact**:

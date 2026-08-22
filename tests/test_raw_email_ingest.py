@@ -6,11 +6,7 @@ from email.policy import default
 from pathlib import Path
 from typing import cast
 
-from basement_analysis.raw_email_ingest import (
-    X_SENSE_RAW_OBJECT_KEY_PREFIX,
-    process_raw_email_batch,
-    sha256_hex,
-)
+from basement_analysis.raw_email_ingest import process_raw_email_batch, sha256_hex
 
 
 def write_email(
@@ -58,36 +54,35 @@ def test_ingest_emails_writes_r2_style_raw_csv_and_manifest_objects(tmp_path: Pa
     results = process_raw_email_batch(
         raw_email_dir=raw_email_dir,
         object_store_dir=object_store_dir,
-        raw_object_key_prefix=X_SENSE_RAW_OBJECT_KEY_PREFIX,
     )
 
     raw_sha256 = sha256_hex(raw_bytes)
     csv_sha256 = sha256_hex(attachment_bytes)
     assert [result.status for result in results] == ["accepted"]
-    assert results[0].raw_object_key == (
-        f"{X_SENSE_RAW_OBJECT_KEY_PREFIX}/received_date=2026-07-04/sample.eml"
+    assert results[0].message_object_key == (
+        f"ingest/x-sense/messages/received_date=2026-07-04/sha256={raw_sha256}.eml"
     )
-    assert results[0].manifest_object_key == (
-        f"manifests/ingest/source=x-sense/received_date=2026-07-04/raw_sha256={raw_sha256}.json"
+    assert results[0].outcome_object_key == (
+        f"ingest/x-sense/outcomes/received_date=2026-07-04/sha256={raw_sha256}.json"
     )
 
-    assert (object_store_dir / results[0].raw_object_key).read_bytes() == raw_bytes
-    csv_object_key = (
-        "csv/source=x-sense/export_date=2026-07-03/"
-        f"attachment_sha256={csv_sha256}/Thermo-hygrometer_Export_Data_20260703.csv"
+    assert (object_store_dir / results[0].message_object_key).read_bytes() == raw_bytes
+    attachment_object_key = (
+        "ingest/x-sense/attachments/export_date=2026-07-03/"
+        f"sha256={csv_sha256}/Thermo-hygrometer_Export_Data_20260703.csv"
     )
-    assert (object_store_dir / csv_object_key).read_bytes() == attachment_bytes
+    assert (object_store_dir / attachment_object_key).read_bytes() == attachment_bytes
 
     manifest = cast(
         dict[str, object],
-        json.loads((object_store_dir / results[0].manifest_object_key).read_text(encoding="utf-8")),
+        json.loads((object_store_dir / results[0].outcome_object_key).read_text(encoding="utf-8")),
     )
     assert manifest["status"] == "accepted"
-    assert manifest["raw_object_key"] == results[0].raw_object_key
+    assert manifest["message_object_key"] == results[0].message_object_key
     attachments = cast(list[dict[str, object]], manifest["attachments"])
     assert attachments[0]["status"] == "extracted"
     assert attachments[0]["row_count"] == 2
-    assert attachments[0]["csv_object_key"] == csv_object_key
+    assert attachments[0]["attachment_object_key"] == attachment_object_key
 
 
 def test_ingest_emails_uses_manifests_for_idempotence_and_content_dedupe(

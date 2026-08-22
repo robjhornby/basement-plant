@@ -73,8 +73,8 @@ def write_curated_dataset(
 
     write_partitioned_parquet(
         frame=sensor_frame(sensor_readings),
-        base_path=dataset_dir / "sensor_readings" / "source=x_sense",
-        partition_columns=("location_slug", "year", "month"),
+        base_path=dataset_dir / "sensor-readings" / "source=x-sense",
+        partition_columns=("location", "year", "month"),
     )
     write_partitioned_parquet(
         frame=event_frame(events),
@@ -83,15 +83,15 @@ def write_curated_dataset(
     )
     write_partitioned_parquet(
         frame=weather_frame(weather_hours),
-        base_path=dataset_dir / "weather_hours" / "source=open_meteo",
+        base_path=dataset_dir / "weather-hours" / "source=open-meteo",
         partition_columns=("year", "month"),
     )
     write_partitioned_parquet(
         frame=rain_frame(rain_readings),
         base_path=(
             dataset_dir
-            / "rain_readings"
-            / "source=environment_agency"
+            / "rain-readings"
+            / "source=environment-agency"
             / f"station={ENVIRONMENT_AGENCY_RAIN_STATION}"
         ),
         partition_columns=("year", "month"),
@@ -260,7 +260,7 @@ def load_sensor_readings_from_parquet(
         list[tuple[datetime, str, float, float, float]],
         fetch_parquet_rows(
             connection,
-            join_curated_data_path(dataset_root, "sensor_readings"),
+            join_curated_data_path(dataset_root, "sensor-readings"),
             """
             select timestamp at time zone 'UTC' as timestamp, location, temperature_c,
                    relative_humidity_pct, absolute_humidity_g_m3
@@ -362,7 +362,7 @@ def load_weather_hours_from_parquet(
         list[tuple[datetime, float, float, float, float, float, float]],
         fetch_parquet_rows(
             connection,
-            join_curated_data_path(dataset_root, "weather_hours"),
+            join_curated_data_path(dataset_root, "weather-hours"),
             """
             select timestamp at time zone 'UTC' as timestamp, temperature_c,
                    relative_humidity_pct, dew_point_c, precipitation_mm, rain_mm,
@@ -401,7 +401,7 @@ def load_rain_readings_from_parquet(
         list[tuple[datetime, float]],
         fetch_parquet_rows(
             connection,
-            join_curated_data_path(dataset_root, "rain_readings"),
+            join_curated_data_path(dataset_root, "rain-readings"),
             """
             select timestamp at time zone 'UTC' as timestamp, rainfall_mm
             from read_parquet($1, hive_partitioning = true)
