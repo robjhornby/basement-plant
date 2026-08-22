@@ -3,13 +3,11 @@
 ## Heading
 
 Frutiger Aero dampness dashboard is shipped and live at https://robjhornby.com/basement/.
-The tank-fill predictor has been rebuilt around a moisture-drawdown "fuel gauge" (fraction-full /
-cycles-remaining / time-remaining), replacing the calendar-days next-full estimate — the fill rate
-is non-stationary because the basement is drying. **All three issues have now landed in code:** 01
-(estimator), 02 (footer swap, wording confirmed by Rob), 03 (logged tank-full events reach the
-hosted curated feed). Separately, nightly curation is now incremental and R2-native (reads only
-CSVs newer than the parquet watermark; the bulk download step is gone). All of this is uncommitted
-and not yet deployed.
+The R2-backed basement event store and manual GitHub Action entry flow are implemented and
+committed on local `main`: all six PRD tickets are resolved, the 12 legacy events were migrated
+exactly once and verified live in R2, and the repository no longer carries the CSV. The workflow
+commits have not been pushed/deployed, so the one-off UTC Parquet rebuild and live Action-to-site
+smoke test have not run yet.
 
 **Autonomy:** ask <!-- ask | go -->
 
@@ -17,22 +15,17 @@ and not yet deployed.
 
 <!-- one per live line of work: name — area — one-line state — [artifact](path) -->
 
-- (none — both live lines are Awaiting Rob's ship decision below)
+- (none — implementation is complete; rollout evidence belongs to Rob below)
 
 ## Awaiting
 
 <!-- someone else's move: name — area — the evidence wanted and who owns getting it — [artifact](path) -->
 
-- incremental-curation — Upkeep — both issues landed in code: curate-ingested-r2 reads R2
-  directly via DuckDB and ingests only CSVs newer than the watermark (issue 01), and the workflow's
-  bulk aws-sync download step is deleted (issue 02). Suite 76 green, ruff+pyright clean, verified
-  end-to-end on a local fixture; uncommitted + undeployed. Waiting on Rob to ship (commit + deploy),
-  then a workflow_dispatch run to confirm the download step is gone and curate reads only recent
-  CSVs from R2 with the site still building — [PRD](.scratch/incremental-curation/PRD.md)
-- tank-fill-gauge — Build — rebuild complete in code (issues 01/02/03) plus the hosted-build fix
-  (un-ignored data/basement_events.csv), full suite green + ruff clean, all uncommitted and
-  undeployed. Waiting on Rob to say ship it (commit + deploy), then a live smoke-test that the gauge
-  footer renders on https://robjhornby.com/basement/ — [PRD](.scratch/tank-fill-reassessment/PRD.md)
+- enter-events-via-github-action — Prove — six tickets committed on local `main`; live R2 contains
+  the 12 verified migrated events; final gate 108 tests, Ruff, strict Pyright, YAML, and diff checks
+  green. Rob owns pushing/deploying, then running `curate-ingested-r2 --rebuild-all` once and
+  dispatching `Log basement event` to prove successful upload → `workflow_run` rebuild → refreshed
+  live site (and that a failed logger does not run the build job) — [PRD](.scratch/enter-events-via-github-action/PRD.md)
 
 ## Parked
 

@@ -1,6 +1,6 @@
 # 01 — Adopt Pydantic; convert package dataclasses to Pydantic models
 
-Status: open
+Status: resolved
 Type: task
 Blocked by: (none)
 Parent PRD: ../PRD.md
@@ -39,3 +39,10 @@ Pydantic from the start.
 
 - Python 3.14, `typeCheckingMode = "strict"` — ensure Pydantic models type-check
   cleanly under pyright strict.
+
+## Answer
+
+Landed in commit `df36385`: Pydantic is a locked project dependency and every package record
+formerly implemented as a dataclass is now a Pydantic model, preserving frozen semantics where
+applicable. The final feature gate passes 108 tests, Ruff, and strict Pyright; no package
+`@dataclass` record remains.

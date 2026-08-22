@@ -1,6 +1,6 @@
 # 02 — Normalize all pipeline timestamps to UTC
 
-Status: open
+Status: resolved
 Type: task
 Blocked by: 01
 Parent PRD: ../PRD.md
@@ -54,3 +54,11 @@ Because curated timestamps change representation, a one-off
 `curate-ingested-r2 --rebuild-all` is required to re-derive the whole curated
 parquet under UTC. Incremental watermark logic must not mix old naive-local and
 new UTC parquet — the rebuild is mandatory, not optional.
+
+## Answer
+
+Landed in commit `2353053`: canonical sensor, weather, rainfall, event, Parquet, and DuckDB
+timestamps are UTC instants. `london_wall_clock_to_utc` is the shared ingestion boundary,
+including the documented and tested `fold=0` fall-back policy; presentation converts UTC back to
+Europe/London. The final feature gate passes 108 tests, Ruff, and strict Pyright. The required
+production `--rebuild-all` remains a rollout action after these local commits are deployed.

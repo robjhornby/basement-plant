@@ -1,6 +1,6 @@
 # 03 — Event store module + snapshot tests
 
-Status: open
+Status: resolved
 Type: task
 Blocked by: 01, 02
 Parent PRD: ../PRD.md
@@ -82,3 +82,12 @@ Fixtures under `tests/data/event_store/` (checked in as `year=YYYY/<revision_id>
 - DuckDB queries return correct current state / history / deleted views against
   the committed corpus.
 - pyright strict clean; ruff clean.
+
+## Answer
+
+Landed in commit `f654ae3`, with the production R2 row-loading correction in `34c98f1`:
+`EventRecord` validates the append-only create/update/delete model, UTC serialization, enum and
+notes rules; injected clocks/UUIDv7 factories make write snapshots byte-reproducible; object keys
+partition by effective UTC year; and DuckDB derives current, deleted, full-history, and per-event
+views for local or R2 corpora. The live ticket-04 verification read all 12 migrated records through
+the production path. The final feature gate passes 108 tests, Ruff, and strict Pyright.
