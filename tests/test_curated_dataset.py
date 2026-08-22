@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from pathlib import Path
 
+import polars as pl
 import pytest
 
 from basement_analysis import static_site
@@ -73,7 +74,8 @@ def test_curated_dataset_round_trips_through_partitioned_parquet_and_duckdb(
             sensor_reading("2026-07-02T22:00:00", "Living room", 21.0, 58.0),
         ],
         events=[
-            custom_event(datetime.fromisoformat("2026-06-28T16:20:00+00:00"), "Bare floor exposed")
+            custom_event(datetime.fromisoformat("2026-06-28T16:20:00+00:00"), "Bare floor exposed"),
+            custom_event(datetime.fromisoformat("2026-07-02T21:00:00+00:00"), "Tank checked"),
         ],
         weather_hours=[weather_hour("2026-06-28T15:00:00")],
         rain_readings=[
@@ -90,6 +92,8 @@ def test_curated_dataset_round_trips_through_partitioned_parquet_and_duckdb(
         f"rain_readings/source=environment_agency/station={ENVIRONMENT_AGENCY_RAIN_STATION}/"
         "year=2026/month=06/part-00000.parquet"
     ) in relative_paths
+    assert "events/year=2026/part-00000.parquet" in relative_paths
+    assert not any(path.startswith("events/") and "/month=" in path for path in relative_paths)
 
     curated_dataset = load_curated_dataset(dataset_dir)
 
@@ -97,7 +101,10 @@ def test_curated_dataset_round_trips_through_partitioned_parquet_and_duckdb(
         "Basement",
         "Living room",
     ]
-    assert curated_dataset.events[0].notes == "Bare floor exposed"
+    assert [event.notes for event in curated_dataset.events] == [
+        "Bare floor exposed",
+        "Tank checked",
+    ]
     assert curated_dataset.weather_hours[0].absolute_humidity_g_m3 > 0
     assert curated_dataset.rain_readings[0].rainfall_mm == 0.2
 
@@ -202,6 +209,29 @@ def test_load_curated_dataset_from_s3_requires_r2_environment(
 
     with pytest.raises(ValueError, match="R2_ENDPOINT_URL"):
         load_curated_dataset("s3://bucket/parquet")
+
+
+def test_load_curated_dataset_can_skip_legacy_event_schema(tmp_path: Path) -> None:
+    event_path = (
+        tmp_path
+        / "events"
+        / "source=local_manual"
+        / "year=2026"
+        / "month=07"
+        / "part-00000.parquet"
+    )
+    event_path.parent.mkdir(parents=True)
+    pl.DataFrame(
+        {
+            "timestamp": [datetime(2026, 7, 29, 14, 39, 48, tzinfo=UTC)],
+            "description": ["dehumidifer tank full"],
+        }
+    ).write_parquet(event_path)
+
+    dataset = load_curated_dataset(tmp_path, include_events=False)
+
+    assert dataset.events == ()
+    assert dataset.parquet_files == (event_path,)
 
 
 def test_build_static_site_rejects_rebuilding_into_s3_location(tmp_path: Path) -> None:

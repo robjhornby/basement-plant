@@ -221,7 +221,9 @@ def curate_accepted_email_csvs(
     recorder = phase_recorder if phase_recorder is not None else PhaseRecorder()
     existing_root = existing_curated_dataset_root or default_existing_curated_dataset_root()
     with recorder.phase("load-existing-curated-parquet"):
-        existing_dataset = load_curated_dataset(existing_root)
+        # Existing event Parquet is never merged: the canonical JSON store rebuilds it below.
+        # Skipping it also lets the first rollout replace the legacy description-only schema.
+        existing_dataset = load_curated_dataset(existing_root, include_events=False)
 
     # The curated parquet is the full merged history; its newest reading is the watermark. Only
     # CSVs at or after `watermark - OVERLAP_DAYS` can carry anything not already curated, so those
@@ -234,11 +236,8 @@ def curate_accepted_email_csvs(
         else watermark.date() - timedelta(days=OVERLAP_DAYS)
     )
 
-    # Events live in the append-only R2 JSON event store, which is the full authoritative history;
-    # the curated `events` dataset in R2 was a stale seed that never refreshed. Derive current state
-    # from the store each run (via DuckDB over s3://$R2_BUCKET/events/year=*/*.json) so newly logged
-    # events reach the hosted footer. Published with `s3 sync --delete`, this replaces the R2 events
-    # partition rather than merging. Tests inject a local corpus glob.
+    # Rebuild the current event timeline from the canonical JSON event store on every run.
+    # Tests inject a local corpus glob in place of R2.
     with recorder.phase("load-manual-events"):
         events = load_events_from_event_store(events_glob or r2_events_glob())
 

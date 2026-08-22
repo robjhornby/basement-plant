@@ -1,9 +1,4 @@
-"""Shared R2 (S3-compatible) access configuration for DuckDB.
-
-Extracted from ``curated_dataset`` so both the curated-parquet reader and the event store can
-configure httpfs without importing each other (the event store maps records into the ``Event``
-model that lives alongside the curated reader, which would otherwise form an import cycle).
-"""
+"""Shared R2 (S3-compatible) access configuration for DuckDB readers."""
 
 from __future__ import annotations
 
@@ -19,7 +14,7 @@ def configure_r2_access(connection: duckdb.DuckDBPyConnection) -> None:
     missing_names = [name for name in R2_CREDENTIAL_ENV_VARS if not os.getenv(name)]
     if missing_names:
         raise ValueError(
-            "Reading curated Parquet from an s3:// location requires the "
+            "Reading R2 through DuckDB requires the "
             f"{', '.join(R2_CREDENTIAL_ENV_VARS)} environment variables; "
             f"missing: {', '.join(missing_names)}"
         )

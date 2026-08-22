@@ -161,9 +161,7 @@ def chart_timestamp_seconds(timestamp: datetime) -> int:
     # Presentation boundary: the chart x-axis is epoch seconds (an absolute instant). A canonical
     # UTC-aware timestamp yields the correct epoch directly; a naive legacy value is interpreted
     # as Europe/London wall-clock so the same absolute instant is produced either way.
-    aware_timestamp = (
-        timestamp.replace(tzinfo=LONDON) if timestamp.tzinfo is None else timestamp
-    )
+    aware_timestamp = timestamp.replace(tzinfo=LONDON) if timestamp.tzinfo is None else timestamp
     return round(aware_timestamp.timestamp())
 
 

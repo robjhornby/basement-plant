@@ -47,9 +47,6 @@ class BasementReading(Protocol):
     def absolute_humidity_g_m3(self) -> float: ...
 
 
-# The dehumidifier install instant is no longer hardcoded: callers derive it from the earliest
-# `dehumidifier_installed` event in the log and pass it in as `installed_at` (a canonical UTC
-# instant, comparable directly against the UTC-instant reading timestamps).
 TANK_CAPACITY_LITRES = 25
 
 SMOOTHING_WINDOW_MINUTES = 9

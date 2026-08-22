@@ -30,7 +30,7 @@ import numpy as np
 
 from basement_analysis.curated_dataset import load_events_from_event_store, r2_events_glob
 from basement_analysis.event_store import EventType
-from basement_analysis.summaries import Event, installation_datetime
+from basement_analysis.summaries import Event, dehumidifier_installed_at
 
 # ---------------------------------------------------------------------------------------------
 # KNOBS — edit these
@@ -89,7 +89,7 @@ def load_tank_events() -> tuple[datetime, list[datetime]]:
     its first fill interval and exits with a useful error.
     """
     events: list[Event] = load_events_from_event_store(r2_events_glob())
-    installed_at = installation_datetime(events)
+    installed_at = dehumidifier_installed_at(events)
     if installed_at is None:
         raise SystemExit("No dehumidifier_installed event found in the event store")
     tank_full_events = sorted(

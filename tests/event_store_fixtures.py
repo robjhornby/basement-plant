@@ -19,8 +19,8 @@ def write_event_store(root: Path, events: Sequence[Event]) -> str:
     """Write a minimal immutable-record corpus and return its DuckDB glob."""
     for index, event in enumerate(events, start=1):
         record = EventRecord(
-            event_id=uuid.UUID(int=index),
-            revision_id=uuid.UUID(int=index + 10_000),
+            event_id=uuid.UUID(int=(index << 80) | (7 << 76) | (2 << 62)),
+            revision_id=uuid.UUID(int=((index + 10_000) << 80) | (7 << 76) | (2 << 62)),
             operation=Operation.create,
             recorded_at=datetime(2026, 8, 22, tzinfo=UTC),
             effective_at=event.timestamp,

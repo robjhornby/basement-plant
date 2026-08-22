@@ -61,7 +61,7 @@ LEGACY_CSV = (
 
 
 def uuid7_factory() -> Callable[[], uuid.UUID]:
-    values = iter(uuid.UUID(int=(index << 80) | (7 << 76)) for index in range(1, 25))
+    values = iter(uuid.UUID(int=(index << 80) | (7 << 76) | (2 << 62)) for index in range(1, 25))
     return lambda: next(values)
 
 

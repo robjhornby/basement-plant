@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from basement_analysis.curated_dataset import load_curated_dataset
-from basement_analysis.summaries import installation_datetime
+from basement_analysis.summaries import dehumidifier_installed_at
 from basement_analysis.tank_estimator import TankEstimateFailure, estimate_tank_history
 
 SNAPSHOT_DIR = Path(__file__).resolve().parent.parent / "local" / "r2-parquet-snapshot"
@@ -16,7 +16,7 @@ def main() -> None:
         raise SystemExit(f"Curated snapshot not found: {SNAPSHOT_DIR}")
 
     curated_dataset = load_curated_dataset(SNAPSHOT_DIR)
-    installed_at = installation_datetime(curated_dataset.events)
+    installed_at = dehumidifier_installed_at(curated_dataset.events)
     if installed_at is None:
         raise SystemExit("Could not infer tank timeline: no dehumidifier_installed event")
     result = estimate_tank_history(curated_dataset.sensor_readings, installed_at)

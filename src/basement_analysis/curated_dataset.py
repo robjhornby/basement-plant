@@ -78,8 +78,8 @@ def write_curated_dataset(
     )
     write_partitioned_parquet(
         frame=event_frame(events),
-        base_path=dataset_dir / "events" / "source=local_manual",
-        partition_columns=("year", "month"),
+        base_path=dataset_dir / "events",
+        partition_columns=("year",),
     )
     write_partitioned_parquet(
         frame=weather_frame(weather_hours),
@@ -99,14 +99,18 @@ def write_curated_dataset(
     return tuple(sorted(dataset_dir.glob("**/*.parquet")))
 
 
-def load_curated_dataset(dataset_root: CuratedDataRoot) -> CuratedDataset:
+def load_curated_dataset(
+    dataset_root: CuratedDataRoot, *, include_events: bool = True
+) -> CuratedDataset:
     connection = duckdb.connect(database=":memory:")
     try:
         if isinstance(dataset_root, str):
             configure_r2_access(connection)
         return CuratedDataset(
             sensor_readings=tuple(load_sensor_readings_from_parquet(connection, dataset_root)),
-            events=tuple(load_events_from_parquet(connection, dataset_root)),
+            events=(
+                tuple(load_events_from_parquet(connection, dataset_root)) if include_events else ()
+            ),
             weather_hours=tuple(load_weather_hours_from_parquet(connection, dataset_root)),
             rain_readings=tuple(load_rain_readings_from_parquet(connection, dataset_root)),
             parquet_files=list_parquet_files(connection, dataset_root),
@@ -166,7 +170,7 @@ def event_frame(events: Sequence[Event]) -> pl.DataFrame:
             "notes": pl.String,
         },
         strict=True,
-    ).with_columns(partition_columns())
+    ).with_columns(year_partition_column())
 
 
 def weather_frame(weather_hours: Sequence[WeatherHour]) -> pl.DataFrame:
@@ -215,6 +219,10 @@ def partition_columns() -> tuple[pl.Expr, pl.Expr]:
     return pl.col("timestamp").dt.year().alias("year"), pl.col("timestamp").dt.strftime("%m").alias(
         "month"
     )
+
+
+def year_partition_column() -> pl.Expr:
+    return pl.col("timestamp").dt.year().alias("year")
 
 
 def write_partitioned_parquet(

@@ -7,8 +7,6 @@ nothing in between. This module is the one place the ``Europe/London`` IANA zone
 interpreted, so callers never hardcode a ``+00:00``/``+01:00`` offset and the
 timezone database decides GMT vs BST per date.
 
-Ticket 03 (event input parsing) reuses :func:`london_wall_clock_to_utc` — keep it
-cleanly importable.
 """
 
 from __future__ import annotations

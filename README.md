@@ -72,6 +72,25 @@ If you download objects from R2 with their key structure already present under
 the input directory, pass `--raw-object-key-prefix ""` to preserve those local
 relative paths as object keys.
 
+The GitHub Action exposes create-only event logging. To stage an update or deletion locally,
+use the one-off revision script; it writes an immutable JSON record and prints its R2 object key:
+
+```bash
+uv run scripts/revise_event.py update \
+  --event-id <uuidv7> \
+  --event-type custom \
+  --effective-at "2026-08-22 14:30:45" \
+  --notes "Corrected observation"
+
+uv run scripts/revise_event.py delete \
+  --event-id <uuidv7> \
+  --event-type dehumidifier_tank_full \
+  --effective-year 2026
+```
+
+Upload the printed file path with the same `aws s3 cp` R2 credential pattern used by
+`.github/workflows/log-event.yml`.
+
 ## Layout
 
 - `src/basement_analysis/` is the production package. New analysis, physics,

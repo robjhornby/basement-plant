@@ -1,4 +1,4 @@
-"""R2-backed, append-only event store (Appendix A of the PRD, adapted to R2).
+"""R2-backed, append-only event store.
 
 The store is one **immutable JSON file per mutation** under
 ``s3://$R2_BUCKET/events/year=YYYY/<revision_id>.json``. There are no in-place
@@ -63,8 +63,8 @@ __all__ = [
     "write_record",
 ]
 
-# Manual event entry format: space-separated, seconds required (Appendix B). Interpreted as
-# `Europe/London` wall-clock, then converted to a canonical UTC instant.
+# Manual event entry is interpreted as a ``Europe/London`` wall clock and converted to UTC.
+# The format is space-separated and requires seconds.
 EVENT_INPUT_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 
@@ -103,10 +103,7 @@ class EventData(BaseModel):
 
 
 class EventSource(BaseModel):
-    """Provenance of the GitHub Actions run. All fields optional (migration supplies only workflow).
-
-    ``run_id`` is a string, matching the Appendix A example (``"123456789"``).
-    """
+    """Provenance for an event record; migration and local records may use a subset of fields."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -130,6 +127,13 @@ class EventRecord(BaseModel):
     data: EventData = EventData()
     source: EventSource = EventSource()
 
+    @field_validator("event_id", "revision_id")
+    @classmethod
+    def _require_uuid7(cls, value: uuid.UUID) -> uuid.UUID:
+        if value.version != 7:
+            raise ValueError("event store identifiers must be UUIDv7")
+        return value
+
     @field_validator("recorded_at", "effective_at")
     @classmethod
     def _require_utc_instant(cls, value: datetime | None) -> datetime | None:
@@ -142,7 +146,7 @@ class EventRecord(BaseModel):
 
     @model_validator(mode="after")
     def _check_operation_invariants(self) -> EventRecord:
-        # A tombstone has no effective_at; create/update always do (Appendix A delete example).
+        # A tombstone has no effective_at; create and update records always do.
         if self.operation == Operation.delete:
             if self.effective_at is not None:
                 raise ValueError("delete records (tombstones) must omit effective_at")
@@ -276,8 +280,7 @@ def object_key(record: EventRecord, *, effective_year: int | None = None) -> str
 def serialize_record(record: EventRecord) -> str:
     """Serialize a record to its canonical JSON text (2-space indent, trailing newline).
 
-    ``exclude_none`` omits ``effective_at`` on tombstones and ``notes`` when empty, matching the
-    Appendix A field-omission rules.
+    ``exclude_none`` omits ``effective_at`` on tombstones and ``notes`` when empty.
     """
     return record.model_dump_json(indent=2, exclude_none=True) + "\n"
 
@@ -303,7 +306,7 @@ def write_record(
 # identically for local paths and remote `s3://` objects without a second file read.
 
 # Both CTEs are always declared; a query may use only `history`. Ordering by `recorded_at DESC,
-# revision_id DESC` matches Appendix A (UUIDv7 ids break ties chronologically).
+# revision_id DESC` uses UUIDv7 ids to break timestamp ties chronologically.
 _HISTORY_CTE = """
 with history as (
     select *
@@ -391,8 +394,7 @@ def deleted_events(connection: duckdb.DuckDBPyConnection, glob: str) -> list[Eve
 def full_history(connection: duckdb.DuckDBPyConnection, glob: str) -> list[EventRecord]:
     """Every stored revision, ordered by ``event_id`` then chronologically."""
     sql = _HISTORY_CTE + (
-        f"select {_record_json('history')} from history "
-        "order by event_id, recorded_at, revision_id"
+        f"select {_record_json('history')} from history order by event_id, recorded_at, revision_id"
     )
     return _query_records(connection, sql, [glob])
 

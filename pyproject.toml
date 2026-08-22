@@ -10,6 +10,7 @@ dependencies = [
     "pillow>=12.3.0",
     "polars>=1.42.1",
     "pydantic>=2.13.4",
+    "pytz>=2026.3.post1",
 ]
 
 [project.scripts]

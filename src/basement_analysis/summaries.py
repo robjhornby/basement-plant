@@ -631,18 +631,10 @@ def build_site_analysis_summary(
     )
 
 
-def installation_datetime(events: Sequence[Event]) -> datetime | None:
-    """The dehumidifier install instant: the earliest ``dehumidifier_installed`` event, or None.
-
-    Limitation (per "prefer simple models, refine with data"): with **no** install event this is
-    None and the tank footer is omitted; with **multiple** install events the earliest wins, no
-    heavier guarding. The migrated log has exactly one install row, so both branches are documented
-    rather than defended.
-    """
+def dehumidifier_installed_at(events: Sequence[Event]) -> datetime | None:
+    """Return the earliest dehumidifier-installed event timestamp, or ``None``."""
     install_times = [
-        event.timestamp
-        for event in events
-        if event.event_type == EventType.dehumidifier_installed
+        event.timestamp for event in events if event.event_type == EventType.dehumidifier_installed
     ]
     return min(install_times) if install_times else None
 
@@ -658,7 +650,7 @@ def build_tank_footer_text(
     must never block site publication: it omits the paragraph and prints a warning so the missing
     sentence stays discoverable.
     """
-    installed_at = installation_datetime(events)
+    installed_at = dehumidifier_installed_at(events)
     if installed_at is None:
         print(
             "warning: dehumidifier tank footer omitted: no dehumidifier_installed event in the log",
@@ -666,9 +658,7 @@ def build_tank_footer_text(
         )
         return None
     tank_full_events = [
-        event.timestamp
-        for event in events
-        if event.event_type == EventType.dehumidifier_tank_full
+        event.timestamp for event in events if event.event_type == EventType.dehumidifier_tank_full
     ]
     try:
         estimate = estimate_tank_gauge(sensor_readings, tank_full_events, installed_at)

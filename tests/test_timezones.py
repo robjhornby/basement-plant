@@ -30,13 +30,9 @@ def test_autumn_fall_back_ambiguous_hour_resolves_to_the_bst_occurrence() -> Non
     # occurrence, so the canonical instant is 00:30 UTC.
     ambiguous = datetime(2026, 10, 25, 1, 30)
 
-    assert london_wall_clock_to_utc(ambiguous) == datetime(
-        2026, 10, 25, 0, 30, tzinfo=UTC
-    )
+    assert london_wall_clock_to_utc(ambiguous) == datetime(2026, 10, 25, 0, 30, tzinfo=UTC)
     # The GMT (second) occurrence would have been 01:30 UTC — confirm fold=0 did not pick it.
-    assert london_wall_clock_to_utc(ambiguous) != datetime(
-        2026, 10, 25, 1, 30, tzinfo=UTC
-    )
+    assert london_wall_clock_to_utc(ambiguous) != datetime(2026, 10, 25, 1, 30, tzinfo=UTC)
 
 
 def test_aware_input_is_rejected() -> None:

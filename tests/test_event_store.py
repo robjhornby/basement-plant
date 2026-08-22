@@ -156,14 +156,21 @@ def test_write_record_emits_bytes_identical_to_corpus(tmp_path: Path) -> None:
         assert written == expected
 
 
+def test_event_record_rejects_non_uuid7_identifiers() -> None:
+    payload = build_snapshot_records()[0][0].model_dump()
+    payload["event_id"] = uuid.uuid4()
+
+    with pytest.raises(ValidationError, match="UUIDv7"):
+        EventRecord.model_validate(payload)
+
+
 def test_object_key_uses_effective_at_year_and_delete_fallback() -> None:
     a_create, _ = build_snapshot_records()[0]
     assert object_key(a_create) == f"events/year=2026/{a_create.revision_id}.json"
 
     c_delete, year = build_snapshot_records()[4]
     assert (
-        object_key(c_delete, effective_year=year)
-        == f"events/year=2027/{c_delete.revision_id}.json"
+        object_key(c_delete, effective_year=year) == f"events/year=2027/{c_delete.revision_id}.json"
     )
     # Without a supplied year, a tombstone falls back to its recorded_at (2026) partition.
     assert object_key(c_delete) == f"events/year=2026/{c_delete.revision_id}.json"
