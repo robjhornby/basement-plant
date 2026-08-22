@@ -5,6 +5,11 @@ on:
     # Daily, after the X-Sense export email should have landed in R2.
     - cron: "30 2 * * *"
   workflow_dispatch:
+  # GitHub only registers workflow_run subscriptions from the default-branch version of this
+  # file. This repository deploys workflows from main, so event logging triggers this build.
+  workflow_run:
+    workflows: ["Log basement event"]
+    types: [completed]
 
 concurrency:
   group: basement-site
@@ -12,7 +17,6 @@ concurrency:
 
 permissions:
   contents: read
-  actions: write
 
 env:
   R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
@@ -22,7 +26,25 @@ env:
   R2_SITE_BUCKET: ${{ secrets.R2_SITE_BUCKET }}
 
 jobs:
+  keep-scheduled-workflow-enabled:
+    # This maintenance call is unrelated to event logging. Keep its elevated permission isolated
+    # to scheduled runs; workflow_run builds never receive actions:write.
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      # GitHub auto-disables scheduled workflows in public repos after 60 days without repo
+      # activity. Re-enabling on every scheduled run preserves the existing keepalive behavior.
+      - name: Keep scheduled workflow enabled
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/basement-site.yml/enable"
+
   build-and-publish:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -31,14 +53,6 @@ jobs:
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
           enable-cache: true
-
-      # GitHub auto-disables scheduled workflows in public repos after 60 days
-      # without repo activity. Re-enabling on every run resets that timer so
-      # the daily cron keeps firing even if nothing else touches the repo.
-      - name: Keep scheduled workflow enabled
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/basement-site.yml/enable"
 
       - name: Curate accepted email CSVs into Parquet
         # Reads manifests and CSVs straight from R2 via DuckDB (R2_* credentials from the global

@@ -1,6 +1,6 @@
 # 06 — GitHub Action to log events + workflow_run rebuild trigger
 
-Status: open
+Status: resolved
 Type: task
 Blocked by: 03, 05
 Parent PRD: ../PRD.md
@@ -73,3 +73,27 @@ re-derived under UTC (ticket 02) and picks up the migrated events (ticket 04).
   log-event run does **not** trigger a rebuild.
 - The rebuilt site reflects the new event.
 - `log-event.yml` holds no cross-workflow dispatch call or elevated token.
+
+## Answer
+
+Implemented `basement log-event` as the create-only entry boundary: it accepts the exact
+London wall-clock/type/notes arguments, validates through the event-store models, maps GitHub
+provenance environment variables, writes the immutable JSON beneath `events/year=YYYY/`, and
+prints that relative path as the destination object key.
+
+Added `log-event.yml` with the three owner-facing choices mapped to enum slugs and an R2
+`aws s3 cp` upload using the existing credential/checksum pattern. It has read-only repository
+permissions and contains no token or cross-workflow dispatch. `basement-site.yml` now subscribes
+to successful completion through `workflow_run`; failed logging runs start no build job. The
+existing scheduled-workflow keepalive is isolated in a schedule-only job with its own
+`actions: write` permission, so event-triggered builds stay read-only.
+
+The `workflow_run` subscription is only registered from the default-branch copy of
+`basement-site.yml`; that is correct once this change is on `main`. No workflow was dispatched
+and no R2 object was written during implementation. After deployment, run the documented
+one-off `curate-ingested-r2 --rebuild-all` rollout before relying on the refreshed site.
+
+Validation: 5 focused CLI tests and the full pytest suite passed; Ruff lint and strict Pyright
+passed; Ruby/Psych YAML parsing plus ticket-specific semantic assertions passed for both workflow
+files. Ruff format confirms the ticket's Python files are formatted (the repo-wide check still
+reports six pre-existing unrelated files).

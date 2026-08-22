@@ -2,12 +2,20 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 from typing import cast
 
 from basement_analysis.curated_dataset import parse_curated_data_location
+from basement_analysis.event_store import (
+    EventSource,
+    EventType,
+    build_create_record,
+    parse_event_effective_at,
+    write_record,
+)
 from basement_analysis.hosted_curation import curate_accepted_email_csvs
 from basement_analysis.observability import (
     PhaseRecorder,
@@ -39,9 +47,55 @@ def main(argv: Sequence[str] | None = None) -> None:
     if argument_list and argument_list[0] == "timings-summary":
         timings_summary(argument_list[1:])
         return
+    if argument_list and argument_list[0] == "log-event":
+        log_event(argument_list[1:])
+        return
     if argument_list and argument_list[0] == "build-site":
         argument_list = argument_list[1:]
     build_site(argument_list)
+
+
+def log_event(argv: Sequence[str] | None = None) -> None:
+    """Validate and stage one immutable event-store create record for upload to R2."""
+    parser = argparse.ArgumentParser(description="Log a new basement event.")
+    parser.add_argument(
+        "--effective-at",
+        required=True,
+        type=parse_event_effective_at,
+        metavar="YYYY-MM-DD HH:mm:ss",
+        help="Event time in Europe/London, with seconds required.",
+    )
+    parser.add_argument(
+        "--event-type",
+        required=True,
+        type=EventType,
+        choices=list(EventType),
+        metavar="SLUG",
+        help="Event type slug.",
+    )
+    parser.add_argument(
+        "--notes",
+        default="",
+        help="Optional notes; required and non-empty for custom events.",
+    )
+    args = parser.parse_args(argv)
+
+    if args.event_type == EventType.custom and not args.notes.strip():
+        parser.error("--notes is required and must be non-empty for custom events")
+
+    source = EventSource(
+        repository=os.environ.get("GITHUB_REPOSITORY"),
+        workflow=os.environ.get("GITHUB_WORKFLOW"),
+        run_id=os.environ.get("GITHUB_RUN_ID"),
+        git_sha=os.environ.get("GITHUB_SHA"),
+    )
+    record = build_create_record(
+        event_type=args.event_type,
+        effective_at=args.effective_at,
+        notes=args.notes,
+        source=source,
+    )
+    print(write_record(record, Path()))
 
 
 def build_site(argv: Sequence[str] | None = None) -> None:

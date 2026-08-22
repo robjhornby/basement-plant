@@ -1,0 +1,73 @@
+name: Log basement event
+
+on:
+  workflow_dispatch:
+    inputs:
+      effective_at:
+        description: "Europe/London time: YYYY-MM-DD HH:mm:ss"
+        required: true
+        type: string
+      event_type:
+        description: Event type
+        required: true
+        type: choice
+        options:
+          - dehumidifier tank full
+          - dehumidifier tank emptied
+          - custom
+      notes:
+        description: Notes (required for custom events)
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
+  R2_BUCKET: ${{ secrets.R2_BUCKET }}
+
+jobs:
+  log-event:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          enable-cache: true
+
+      - name: Validate and stage event record
+        id: stage_event
+        env:
+          EFFECTIVE_AT: ${{ inputs.effective_at }}
+          EVENT_TYPE_DISPLAY: ${{ inputs.event_type }}
+          EVENT_NOTES: ${{ inputs.notes }}
+        run: |
+          case "$EVENT_TYPE_DISPLAY" in
+            "dehumidifier tank full") event_type="dehumidifier_tank_full" ;;
+            "dehumidifier tank emptied") event_type="dehumidifier_tank_emptied" ;;
+            "custom") event_type="custom" ;;
+            *) echo "Unsupported event type: $EVENT_TYPE_DISPLAY" >&2; exit 2 ;;
+          esac
+
+          object_key="$(uv run basement log-event \
+            --effective-at "$EFFECTIVE_AT" \
+            --event-type "$event_type" \
+            --notes "$EVENT_NOTES")"
+          printf 'object_key=%s\n' "$object_key" >> "$GITHUB_OUTPUT"
+
+      - name: Upload immutable event record to R2
+        env:
+          EVENT_OBJECT_KEY: ${{ steps.stage_event.outputs.object_key }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          # R2 predates the aws-cli default CRC32 request checksums; only send them when required.
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+        run: >
+          aws s3 cp "$EVENT_OBJECT_KEY" "s3://$R2_BUCKET/$EVENT_OBJECT_KEY"
+          --endpoint-url "$R2_ENDPOINT_URL" --no-progress
