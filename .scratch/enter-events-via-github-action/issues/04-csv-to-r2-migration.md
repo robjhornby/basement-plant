@@ -1,6 +1,6 @@
 # 04 — Migrate basement_events.csv into R2; remove the CSV
 
-Status: open
+Status: resolved
 Type: task
 Blocked by: 03
 Parent PRD: ../PRD.md
@@ -48,3 +48,19 @@ them to R2 (`aws s3 sync`/`cp`, same creds as the existing workflow).
 - All 12 events present in R2, correctly typed, UTC `effective_at`, notes verbatim.
 - CSV removed from the repo and re-gitignored.
 - No consumer still reads `data/basement_events.csv` (coordinate with ticket 05).
+
+## Answer / Comments
+
+Implemented a duplicate-safe one-off migration script that validates the fixed 12-row corpus,
+checks R2 for prior `csv-migration` records before any append, maps London wall clocks to UTC,
+builds create records through the ticket-03 builder, uploads with the AWS CLI, and downloads the
+objects again for exact verification. The live prefix initially contained zero objects, so the
+migration ran once and wrote 12 unique records with a shared `recorded_at` of
+`2026-08-22T13:48:33.253874Z`: 6 `custom`, 1 `dehumidifier_installed`, and 5
+`dehumidifier_tank_full`. A separate derive-current-state query against R2 verified all effective
+UTC timestamps and verbatim notes; the installation is `2026-07-01T20:00:00Z`, or 21:00 London.
+
+The live verification exposed and fixed the read path attempting to open selected `s3://` URLs
+with `pathlib`; selected DuckDB rows are now validated directly while retaining exact UTC
+microseconds. Ticket 05 had already removed production CSV consumers, so the legacy CSV and its
+`.gitignore` un-ignore exception were removed.

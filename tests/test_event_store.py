@@ -9,13 +9,14 @@ byte-identical across runs given the frozen clock and fixed id factory below.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
+from basement_analysis import event_store as event_store_module
 from basement_analysis.event_store import (
     EventRecord,
     EventSource,
@@ -188,6 +189,20 @@ def test_current_events_excludes_tombstoned_and_keeps_latest_revision(read_glob:
     a_current = current[0]
     assert a_current.operation == Operation.update
     assert a_current.data.notes == UPDATED_A_NOTES
+
+
+def test_current_events_validates_duckdb_rows_without_reopening_paths(
+    read_glob: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail_if_reopened(_paths: Iterable[Path | str]) -> list[EventRecord]:
+        raise AssertionError("selected object paths must not be reopened outside DuckDB")
+
+    monkeypatch.setattr(event_store_module, "load_records", fail_if_reopened)
+    connection = connect_event_store(read_glob)
+    try:
+        assert len(current_events(connection, read_glob)) == 2
+    finally:
+        connection.close()
 
 
 def test_event_history_returns_every_revision_oldest_first(read_glob: str) -> None:

@@ -30,7 +30,6 @@ from collections.abc import Callable, Iterable
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
-from typing import cast
 
 import duckdb
 from pydantic import BaseModel, ConfigDict, field_serializer, field_validator, model_validator
@@ -299,16 +298,15 @@ def write_record(
 
 # --- Read path (DuckDB) ------------------------------------------------------------------------
 #
-# DuckDB reads the JSON corpus and derives which revisions are current/deleted (the windowing).
-# Python then loads exactly those files back into typed `EventRecord`s, so the read path stays
-# strongly typed without mapping DuckDB structs onto the model by hand.
+# DuckDB reads the JSON corpus and derives which revisions are current/deleted (the windowing),
+# then serializes the selected rows for Pydantic to validate as typed `EventRecord`s. This works
+# identically for local paths and remote `s3://` objects without a second file read.
 
-# Both CTEs are always declared; a query may use only `history`. `filename = true` surfaces the
-# source object path so we can re-load the chosen records with Pydantic. Ordering by
-# `recorded_at DESC, revision_id DESC` matches Appendix A (UUIDv7 ids break ties chronologically).
+# Both CTEs are always declared; a query may use only `history`. Ordering by `recorded_at DESC,
+# revision_id DESC` matches Appendix A (UUIDv7 ids break ties chronologically).
 _HISTORY_CTE = """
 with history as (
-    select *, filename as source_file
+    select *
     from read_json_auto($1, union_by_name = true, filename = true)
 ),
 latest as (
@@ -319,6 +317,23 @@ latest as (
     from history
 )
 """
+
+
+def _record_json(alias: str) -> str:
+    """Serialize a DuckDB record as validation-ready JSON, preserving UTC timestamp identity.
+
+    DuckDB's generic ``to_json`` renders an inferred timestamp without an offset. The source
+    JSON contract says those instants are UTC, so render the two canonical timestamp fields
+    explicitly with ``Z`` before Pydantic validates them.
+    """
+    return f"""to_json(struct_update(
+        {alias},
+        recorded_at := strftime({alias}.recorded_at, '%Y-%m-%dT%H:%M:%S.%fZ'),
+        effective_at := case
+            when {alias}.effective_at is null then null
+            else strftime({alias}.effective_at, '%Y-%m-%dT%H:%M:%S.%fZ')
+        end
+    ))"""
 
 
 def production_events_glob(bucket: str) -> str:
@@ -346,39 +361,40 @@ def load_records(paths: Iterable[Path | str]) -> list[EventRecord]:
     ]
 
 
-def _query_source_files(
+def _query_records(
     connection: duckdb.DuckDBPyConnection, sql: str, params: list[object]
-) -> list[str]:
+) -> list[EventRecord]:
     rows = connection.execute(sql, params).fetchall()
-    return [cast(str, row[0]) for row in rows]
+    return [EventRecord.model_validate_json(row[0]) for row in rows]
 
 
 def current_events(connection: duckdb.DuckDBPyConnection, glob: str) -> list[EventRecord]:
     """Current non-deleted events: the latest revision per ``event_id`` that is not a tombstone."""
     sql = _HISTORY_CTE + (
-        "select source_file from latest "
+        f"select {_record_json('latest')} from latest "
         "where rn = 1 and operation <> 'delete' "
         "order by effective_at, event_id"
     )
-    return load_records(_query_source_files(connection, sql, [glob]))
+    return _query_records(connection, sql, [glob])
 
 
 def deleted_events(connection: duckdb.DuckDBPyConnection, glob: str) -> list[EventRecord]:
     """Logically deleted events: event_ids whose latest revision is a tombstone."""
     sql = _HISTORY_CTE + (
-        "select source_file from latest "
+        f"select {_record_json('latest')} from latest "
         "where rn = 1 and operation = 'delete' "
         "order by recorded_at, event_id"
     )
-    return load_records(_query_source_files(connection, sql, [glob]))
+    return _query_records(connection, sql, [glob])
 
 
 def full_history(connection: duckdb.DuckDBPyConnection, glob: str) -> list[EventRecord]:
     """Every stored revision, ordered by ``event_id`` then chronologically."""
     sql = _HISTORY_CTE + (
-        "select source_file from history order by event_id, recorded_at, revision_id"
+        f"select {_record_json('history')} from history "
+        "order by event_id, recorded_at, revision_id"
     )
-    return load_records(_query_source_files(connection, sql, [glob]))
+    return _query_records(connection, sql, [glob])
 
 
 def event_history(
@@ -386,8 +402,8 @@ def event_history(
 ) -> list[EventRecord]:
     """The full revision history for a single ``event_id``, oldest first."""
     sql = _HISTORY_CTE + (
-        "select source_file from history "
+        f"select {_record_json('history')} from history "
         "where event_id = $2 "
         "order by recorded_at, revision_id"
     )
-    return load_records(_query_source_files(connection, sql, [glob, str(event_id)]))
+    return _query_records(connection, sql, [glob, str(event_id)])
