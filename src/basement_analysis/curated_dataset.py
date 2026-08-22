@@ -12,6 +12,14 @@ import duckdb
 import polars as pl
 from pydantic import BaseModel, ConfigDict
 
+from basement_analysis.event_store import (
+    EventRecord,
+    EventType,
+    connect_event_store,
+    current_events,
+    production_events_glob,
+)
+from basement_analysis.r2_access import configure_r2_access
 from basement_analysis.summaries import (
     ENVIRONMENT_AGENCY_RAIN_STATION,
     Event,
@@ -24,8 +32,6 @@ from basement_analysis.timezones import UTC
 # A curated dataset root is either a local directory or an `s3://bucket/prefix` URL that
 # DuckDB reads directly (R2 via its S3-compatible endpoint).
 CuratedDataRoot = Path | str
-
-R2_CREDENTIAL_ENV_VARS = ("R2_ENDPOINT_URL", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY")
 
 
 class CuratedDataset(BaseModel):
@@ -109,28 +115,6 @@ def load_curated_dataset(dataset_root: CuratedDataRoot) -> CuratedDataset:
         connection.close()
 
 
-def configure_r2_access(connection: duckdb.DuckDBPyConnection) -> None:
-    """Point DuckDB's S3 support at R2 using credentials from the environment."""
-    missing_names = [name for name in R2_CREDENTIAL_ENV_VARS if not os.getenv(name)]
-    if missing_names:
-        raise ValueError(
-            "Reading curated Parquet from an s3:// location requires the "
-            f"{', '.join(R2_CREDENTIAL_ENV_VARS)} environment variables; "
-            f"missing: {', '.join(missing_names)}"
-        )
-    connection.execute("install httpfs")
-    connection.execute("load httpfs")
-    connection.execute("set s3_region = 'auto'")
-    connection.execute("set s3_url_style = 'path'")
-    connection.execute("set s3_endpoint = ?", [r2_endpoint_host(os.environ["R2_ENDPOINT_URL"])])
-    connection.execute("set s3_access_key_id = ?", [os.environ["R2_ACCESS_KEY_ID"]])
-    connection.execute("set s3_secret_access_key = ?", [os.environ["R2_SECRET_ACCESS_KEY"]])
-
-
-def r2_endpoint_host(endpoint_url: str) -> str:
-    return endpoint_url.removeprefix("https://").removeprefix("http://").rstrip("/")
-
-
 def list_parquet_files(
     connection: duckdb.DuckDBPyConnection, dataset_root: CuratedDataRoot
 ) -> tuple[Path | str, ...]:
@@ -173,11 +157,13 @@ def event_frame(events: Sequence[Event]) -> pl.DataFrame:
     return pl.DataFrame(
         {
             "timestamp": [event.timestamp for event in events],
-            "description": [event.description for event in events],
+            "event_type": [event.event_type.value for event in events],
+            "notes": [event.notes for event in events],
         },
         schema={
             "timestamp": pl.Datetime(time_zone="UTC"),
-            "description": pl.String,
+            "event_type": pl.String,
+            "notes": pl.String,
         },
         strict=True,
     ).with_columns(partition_columns())
@@ -297,21 +283,68 @@ def load_events_from_parquet(
     connection: duckdb.DuckDBPyConnection, dataset_root: CuratedDataRoot
 ) -> list[Event]:
     rows = cast(
-        list[tuple[datetime, str]],
+        list[tuple[datetime, str, str | None]],
         fetch_parquet_rows(
             connection,
             join_curated_data_path(dataset_root, "events"),
             """
-            select timestamp at time zone 'UTC' as timestamp, description
+            select timestamp at time zone 'UTC' as timestamp, event_type, notes
             from read_parquet($1, hive_partitioning = true)
             order by timestamp
             """,
         ),
     )
     return [
-        Event(timestamp=timestamp.replace(tzinfo=UTC), description=description)
-        for timestamp, description in rows
+        Event(
+            timestamp=timestamp.replace(tzinfo=UTC),
+            event_type=EventType(event_type),
+            notes=notes,
+        )
+        for timestamp, event_type, notes in rows
     ]
+
+
+def event_from_record(record: EventRecord) -> Event:
+    """Map a current event-store :class:`EventRecord` to the presentation-layer :class:`Event`.
+
+    ``effective_at`` is the canonical UTC instant the event occurred; ``current_events`` only
+    returns create/update records, which always carry it (delete tombstones are excluded).
+    """
+    if record.effective_at is None:  # pragma: no cover - current_events excludes tombstones
+        raise ValueError(f"current event {record.event_id} has no effective_at")
+    return Event(
+        timestamp=record.effective_at,
+        event_type=record.event_type,
+        notes=record.data.notes,
+    )
+
+
+def load_events_from_event_store(events_glob: str) -> list[Event]:
+    """Derive the current events from the R2 (or local) JSON event store via DuckDB.
+
+    ``events_glob`` is an ``s3://$R2_BUCKET/events/year=*/*.json`` production glob (see
+    :func:`r2_events_glob`) or a local ``year=*/*.json`` corpus glob for tests. Events are ordered
+    by their effective instant, matching the old CSV-sorted order.
+    """
+    connection = connect_event_store(events_glob)
+    try:
+        records = current_events(connection, events_glob)
+    finally:
+        connection.close()
+    return sorted(
+        (event_from_record(record) for record in records), key=lambda event: event.timestamp
+    )
+
+
+def r2_events_glob() -> str:
+    """The production event-store glob ``s3://$R2_BUCKET/events/year=*/*.json``.
+
+    ``R2_BUCKET`` is required (the local full build and the hosted build both read events from R2).
+    """
+    bucket_name = os.getenv("R2_BUCKET")
+    if not bucket_name:
+        raise ValueError("Reading events from the R2 event store requires R2_BUCKET.")
+    return production_events_glob(bucket_name)
 
 
 def load_weather_hours_from_parquet(

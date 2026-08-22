@@ -12,16 +12,17 @@ from pydantic import BaseModel, ConfigDict
 
 from basement_analysis.curated_dataset import (
     CuratedDataRoot,
-    configure_r2_access,
     join_curated_data_path,
     load_curated_dataset,
+    load_events_from_event_store,
+    r2_events_glob,
     write_curated_dataset,
 )
 from basement_analysis.observability import PhaseRecorder
+from basement_analysis.r2_access import configure_r2_access
 from basement_analysis.static_site import (
     fetch_environment_agency_rainfall,
     fetch_open_meteo_weather,
-    load_events,
     sensor_location_for_filename,
     sensor_readings_from_csv_text,
 )
@@ -211,7 +212,7 @@ def curate_accepted_email_csvs(
     object_store_root: CuratedDataRoot,
     curated_dataset_dir: Path,
     work_dir: Path,
-    events_data_dir: Path = Path("data"),
+    events_glob: str | None = None,
     existing_curated_dataset_root: CuratedDataRoot | None = None,
     refresh_weather: bool = True,
     rebuild_all: bool = False,
@@ -233,13 +234,13 @@ def curate_accepted_email_csvs(
         else watermark.date() - timedelta(days=OVERLAP_DAYS)
     )
 
-    # Events are owner-logged in the checked-out repo's basement_events.csv, which is the full
-    # authoritative history; the curated `events` dataset in R2 was a stale seed that never
-    # refreshed. Reload from the CSV each run (the same source the local build uses) so newly
-    # logged tank-full events reach the hosted footer. Published with `s3 sync --delete`, this
-    # replaces the R2 events partition rather than merging.
+    # Events live in the append-only R2 JSON event store, which is the full authoritative history;
+    # the curated `events` dataset in R2 was a stale seed that never refreshed. Derive current state
+    # from the store each run (via DuckDB over s3://$R2_BUCKET/events/year=*/*.json) so newly logged
+    # events reach the hosted footer. Published with `s3 sync --delete`, this replaces the R2 events
+    # partition rather than merging. Tests inject a local corpus glob.
     with recorder.phase("load-manual-events"):
-        events = load_events(events_data_dir)
+        events = load_events_from_event_store(events_glob or r2_events_glob())
 
     with recorder.phase("select-and-parse-accepted-csvs"):
         connection = object_store_connection(object_store_root)

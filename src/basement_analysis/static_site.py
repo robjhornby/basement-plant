@@ -23,6 +23,8 @@ from basement_analysis.curated_dataset import (
     CuratedDataRoot,
     join_curated_data_path,
     load_curated_dataset,
+    load_events_from_event_store,
+    r2_events_glob,
     write_curated_dataset,
 )
 from basement_analysis.observability import PhaseRecorder
@@ -104,8 +106,7 @@ class BuildResult(BaseModel):
 def parse_local_datetime(raw_value: str) -> datetime:
     # Parses the string into a *naive* Europe/London wall-clock datetime; callers convert to a
     # UTC instant via `london_wall_clock_to_utc` at the ingestion boundary. Sensor exports use
-    # minute precision; owner-logged events (basement_events.csv) mix minute precision with
-    # seconds-precision tank-full timestamps, so accept both.
+    # minute precision, but accept seconds too for tolerant ingestion.
     for datetime_format in ("%Y/%m/%d %H:%M:%S", "%Y/%m/%d %H:%M"):
         try:
             return datetime.strptime(raw_value, datetime_format)
@@ -224,24 +225,6 @@ def required_csv_value(row: dict[str, str | None], key: str) -> str:
     if value is None:
         raise ValueError(f"Missing required CSV column {key!r}")
     return value
-
-
-def load_events(data_dir: Path) -> list[Event]:
-    events_path = data_dir / "basement_events.csv"
-    events: list[Event] = []
-    with events_path.open(newline="", encoding="utf-8-sig") as csv_file:
-        reader = csv.DictReader(csv_file)
-        for row in reader:
-            events.append(
-                Event(
-                    # Owner-logged event times are naive Europe/London wall-clock; store as UTC.
-                    timestamp=london_wall_clock_to_utc(
-                        parse_local_datetime(required_csv_value(row, "Time"))
-                    ),
-                    description=required_csv_value(row, "Event"),
-                )
-            )
-    return sorted(events, key=lambda event: event.timestamp)
 
 
 def fetch_json(cache_path: Path, url: str, refresh: bool) -> dict[str, object]:
@@ -615,7 +598,7 @@ def render_uplot_time_series_chart(chart: ChartSpec, fallback_html: str) -> str:
     event_payload: list[JsonValue] = [
         {
             "timestamp": chart_timestamp_seconds(event.timestamp),
-            "description": event.description,
+            "description": event.display_label,
         }
         for event in chart.event_markers
     ]
@@ -2444,6 +2427,7 @@ def build_static_site(
     rebuild_curated_dataset: bool = True,
     phase_recorder: PhaseRecorder | None = None,
     include_private_report: bool = False,
+    events_glob: str | None = None,
 ) -> BuildResult:
     recorder = phase_recorder if phase_recorder is not None else PhaseRecorder()
     resolved_curated_dataset_dir = (
@@ -2461,7 +2445,10 @@ def build_static_site(
         if not sensor_readings_from_csv:
             raise ValueError(f"No sensor readings found in {data_dir}")
 
-        events_from_csv = load_events(data_dir)
+        # Events come from the R2 JSON event store (the CSV is gone), derived to current state via
+        # DuckDB. Tests inject a local corpus glob; production reads s3://$R2_BUCKET/events.
+        with recorder.phase("load-events-from-store"):
+            events_from_store = load_events_from_event_store(events_glob or r2_events_glob())
         dataset_start = min(reading.timestamp for reading in sensor_readings_from_csv)
         dataset_end = max(reading.timestamp for reading in sensor_readings_from_csv)
         cache_dir = output_dir / "cache"
@@ -2483,7 +2470,7 @@ def build_static_site(
             write_curated_dataset(
                 dataset_dir=resolved_curated_dataset_dir,
                 sensor_readings=sensor_readings_from_csv,
-                events=events_from_csv,
+                events=events_from_store,
                 weather_hours=weather_hours_from_api,
                 rain_readings=rain_readings_from_api,
             )

@@ -8,6 +8,7 @@ import pytest
 
 from basement_analysis import hosted_curation
 from basement_analysis.curated_dataset import load_curated_dataset, write_curated_dataset
+from basement_analysis.event_store import EventType
 from basement_analysis.hosted_curation import (
     accepted_csv_keys_from_manifest_texts,
     curate_accepted_email_csvs,
@@ -15,12 +16,20 @@ from basement_analysis.hosted_curation import (
     merge_weather_hours,
 )
 from basement_analysis.summaries import (
-    Event,
+    Event as SummaryEvent,
+)
+from basement_analysis.summaries import (
     RainReading,
     SensorReading,
     WeatherHour,
     absolute_humidity_g_m3,
 )
+from basement_analysis.timezones import london_wall_clock_to_utc
+from event_store_fixtures import write_event_store
+
+
+def custom_event(*, timestamp: datetime, description: str) -> SummaryEvent:
+    return SummaryEvent(timestamp=timestamp, event_type=EventType.custom, notes=description)
 
 
 def _utc(raw_timestamp: str) -> datetime:
@@ -123,12 +132,24 @@ def write_accepted_csv(
     )
 
 
-def write_events_csv(data_dir: Path, rows: list[str]) -> None:
-    data_dir.mkdir(parents=True, exist_ok=True)
-    (data_dir / "basement_events.csv").write_text(
-        "\n".join(["Time,Event", *rows]),
-        encoding="utf-8",
-    )
+def write_event_store_rows(root: Path, rows: list[str]) -> str:
+    event_types = {
+        "dehumidifier installed": EventType.dehumidifier_installed,
+        "dehumidifer tank full": EventType.dehumidifier_tank_full,
+    }
+    events: list[SummaryEvent] = []
+    for row in rows:
+        raw_timestamp, description = row.split(",", maxsplit=1)
+        event_type = event_types[description]
+        events.append(
+            SummaryEvent(
+                timestamp=london_wall_clock_to_utc(
+                    datetime.strptime(raw_timestamp, "%Y/%m/%d %H:%M:%S")
+                ),
+                event_type=event_type,
+            )
+        )
+    return write_event_store(root, events)
 
 
 def stub_weather(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -142,9 +163,7 @@ def stub_weather(monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_rainfall(
         start_date: date, end_date: date, cache_dir: Path, refresh: bool
     ) -> list[RainReading]:
-        return [
-            RainReading(timestamp=_utc("2026-07-03T00:00:00"), rainfall_mm=0.0)
-        ]
+        return [RainReading(timestamp=_utc("2026-07-03T00:00:00"), rainfall_mm=0.0)]
 
     monkeypatch.setattr(hosted_curation, "fetch_open_meteo_weather", fake_weather)
     monkeypatch.setattr(hosted_curation, "fetch_environment_agency_rainfall", fake_rainfall)
@@ -179,8 +198,9 @@ def test_weather_and_rain_fetch_from_their_own_recent_watermark(
         ],
     )
 
-    data_dir = tmp_path / "data"
-    write_events_csv(data_dir, [])
+    events_glob = write_event_store_rows(
+        tmp_path / "events", ["2026/07/01 21:00:00,dehumidifier installed"]
+    )
     (tmp_path / "objects").mkdir()
 
     captured: dict[str, date] = {}
@@ -208,7 +228,7 @@ def test_weather_and_rain_fetch_from_their_own_recent_watermark(
         object_store_root=tmp_path / "objects",
         curated_dataset_dir=tmp_path / "curated",
         work_dir=tmp_path / "work",
-        events_data_dir=data_dir,
+        events_glob=events_glob,
         existing_curated_dataset_root=existing_dataset_dir,
         refresh_weather=False,
     )
@@ -243,7 +263,7 @@ def test_curate_accepted_email_csvs_merges_existing_parquet_and_staged_csvs(
             sensor_reading("2026-07-04T00:00:00", "Thermo-hygrometer_3", 20.0, 58.0),
         ],
         events=[
-            Event(
+            custom_event(
                 timestamp=_utc("2026-07-02T21:00:00"),
                 description="Dehumidifier on",
             )
@@ -258,9 +278,8 @@ def test_curate_accepted_email_csvs_merges_existing_parquet_and_staged_csvs(
         ],
     )
 
-    data_dir = tmp_path / "data"
-    write_events_csv(
-        data_dir,
+    events_glob = write_event_store_rows(
+        tmp_path / "events",
         [
             "2026/07/01 21:00:00,dehumidifier installed",
             "2026/07/05 00:51:03,dehumidifer tank full",
@@ -323,7 +342,7 @@ def test_curate_accepted_email_csvs_merges_existing_parquet_and_staged_csvs(
         object_store_root=object_store_dir,
         curated_dataset_dir=tmp_path / "curated",
         work_dir=tmp_path / "work",
-        events_data_dir=data_dir,
+        events_glob=events_glob,
         existing_curated_dataset_root=existing_dataset_dir,
         refresh_weather=True,
     )
@@ -336,11 +355,10 @@ def test_curate_accepted_email_csvs_merges_existing_parquet_and_staged_csvs(
     assert result.staged_sensor_row_count == 2
     assert result.merged_sensor_row_count == 5
     assert result.event_count == 2
-    # Events come from the checked-out basement_events.csv, not the stale carried-forward R2
-    # events partition ("Dehumidifier on") — the tank-full row now reaches the curated feed.
-    assert [event.description for event in curated_dataset.events] == [
-        "dehumidifier installed",
-        "dehumidifer tank full",
+    # Events come from the JSON event store, not the stale carried-forward curated partition.
+    assert [event.event_type for event in curated_dataset.events] == [
+        EventType.dehumidifier_installed,
+        EventType.dehumidifier_tank_full,
     ]
     assert {reading.location for reading in curated_dataset.sensor_readings} == {
         "Basement",
@@ -372,15 +390,13 @@ def test_curate_refreshes_curated_events_when_a_new_tank_full_line_is_logged(
         dataset_dir=existing_dataset_dir,
         sensor_readings=[sensor_reading("2026-07-03T00:00:00", "Basement", 18.5, 67.2)],
         events=[
-            Event(
+            custom_event(
                 timestamp=_utc("2026-07-02T21:00:00"),
                 description="stale seed event",
             )
         ],
         weather_hours=[weather_hour("2026-07-03T00:00:00")],
-        rain_readings=[
-            RainReading(timestamp=_utc("2026-07-03T00:00:00"), rainfall_mm=0.0)
-        ],
+        rain_readings=[RainReading(timestamp=_utc("2026-07-03T00:00:00"), rainfall_mm=0.0)],
     )
 
     object_store_dir = tmp_path / "objects"
@@ -394,32 +410,34 @@ def test_curate_refreshes_curated_events_when_a_new_tank_full_line_is_logged(
     )
     stub_weather(monkeypatch)
 
-    data_dir = tmp_path / "data"
-    write_events_csv(data_dir, ["2026/07/05 00:51:03,dehumidifer tank full"])
+    events_root = tmp_path / "events"
+    events_glob = write_event_store_rows(events_root, ["2026/07/05 00:51:03,dehumidifer tank full"])
 
     def curate() -> list[str]:
         curate_accepted_email_csvs(
             object_store_root=object_store_dir,
             curated_dataset_dir=tmp_path / "curated",
             work_dir=tmp_path / "work",
-            events_data_dir=data_dir,
+            events_glob=events_glob,
             existing_curated_dataset_root=existing_dataset_dir,
             refresh_weather=False,
         )
-        return [event.description for event in load_curated_dataset(tmp_path / "curated").events]
+        return [
+            event.event_type.value for event in load_curated_dataset(tmp_path / "curated").events
+        ]
 
-    assert curate() == ["dehumidifer tank full"]
+    assert curate() == ["dehumidifier_tank_full"]
 
     # Appending a new tank-full line and re-running is the only manual step needed for the
     # hosted footer to see it.
-    write_events_csv(
-        data_dir,
+    events_glob = write_event_store_rows(
+        events_root,
         [
             "2026/07/05 00:51:03,dehumidifer tank full",
             "2026/07/11 01:46:29,dehumidifer tank full",
         ],
     )
-    assert curate() == ["dehumidifer tank full", "dehumidifer tank full"]
+    assert curate() == ["dehumidifier_tank_full", "dehumidifier_tank_full"]
 
 
 def build_multi_day_object_store(object_store_dir: Path) -> None:
@@ -451,7 +469,7 @@ def test_incremental_run_matches_a_full_rebuild(
         object_store_root=object_store_dir,
         curated_dataset_dir=tmp_path / "full",
         work_dir=tmp_path / "work-full",
-        events_data_dir=_events_dir(tmp_path),
+        events_glob=_events_glob(tmp_path),
         existing_curated_dataset_root=empty_existing,
         refresh_weather=False,
     )
@@ -474,7 +492,7 @@ def test_incremental_run_matches_a_full_rebuild(
         object_store_root=partial_store,
         curated_dataset_dir=tmp_path / "seed",
         work_dir=tmp_path / "work-seed",
-        events_data_dir=_events_dir(tmp_path),
+        events_glob=_events_glob(tmp_path),
         existing_curated_dataset_root=empty_existing,
         refresh_weather=False,
     )
@@ -483,7 +501,7 @@ def test_incremental_run_matches_a_full_rebuild(
         object_store_root=object_store_dir,
         curated_dataset_dir=tmp_path / "incremental",
         work_dir=tmp_path / "work-incremental",
-        events_data_dir=_events_dir(tmp_path),
+        events_glob=_events_glob(tmp_path),
         existing_curated_dataset_root=tmp_path / "seed",
         refresh_weather=False,
     )
@@ -518,7 +536,7 @@ def test_selection_skips_csvs_older_than_the_cutoff(
         object_store_root=object_store_dir,
         curated_dataset_dir=tmp_path / "curated",
         work_dir=tmp_path / "work",
-        events_data_dir=_events_dir(tmp_path),
+        events_glob=_events_glob(tmp_path),
         existing_curated_dataset_root=existing_dataset_dir,
         refresh_weather=False,
     )
@@ -543,7 +561,7 @@ def test_second_incremental_run_with_no_new_csvs_is_a_no_op(
         object_store_root=object_store_dir,
         curated_dataset_dir=tmp_path / "curated",
         work_dir=tmp_path / "work",
-        events_data_dir=_events_dir(tmp_path),
+        events_glob=_events_glob(tmp_path),
         existing_curated_dataset_root=empty_existing,
         refresh_weather=False,
     )
@@ -553,7 +571,7 @@ def test_second_incremental_run_with_no_new_csvs_is_a_no_op(
         object_store_root=object_store_dir,
         curated_dataset_dir=tmp_path / "curated-2",
         work_dir=tmp_path / "work-2",
-        events_data_dir=_events_dir(tmp_path),
+        events_glob=_events_glob(tmp_path),
         existing_curated_dataset_root=tmp_path / "curated",
         refresh_weather=False,
     )
@@ -576,7 +594,7 @@ def test_cold_start_empty_parquet_ingests_all_accepted_csvs(
         object_store_root=object_store_dir,
         curated_dataset_dir=tmp_path / "curated",
         work_dir=tmp_path / "work",
-        events_data_dir=_events_dir(tmp_path),
+        events_glob=_events_glob(tmp_path),
         existing_curated_dataset_root=empty_existing,
         refresh_weather=False,
     )
@@ -607,7 +625,7 @@ def test_rebuild_all_parses_every_accepted_csv_despite_a_watermark(
         object_store_root=object_store_dir,
         curated_dataset_dir=tmp_path / "curated",
         work_dir=tmp_path / "work",
-        events_data_dir=_events_dir(tmp_path),
+        events_glob=_events_glob(tmp_path),
         existing_curated_dataset_root=existing_dataset_dir,
         refresh_weather=False,
         rebuild_all=True,
@@ -652,7 +670,7 @@ def test_non_accepted_manifest_excludes_its_csv(
         object_store_root=object_store_dir,
         curated_dataset_dir=tmp_path / "curated",
         work_dir=tmp_path / "work",
-        events_data_dir=_events_dir(tmp_path),
+        events_glob=_events_glob(tmp_path),
         existing_curated_dataset_root=empty_existing,
         refresh_weather=False,
     )
@@ -661,11 +679,11 @@ def test_non_accepted_manifest_excludes_its_csv(
     assert result.merged_sensor_row_count == 1
 
 
-def _events_dir(tmp_path: Path) -> Path:
-    data_dir = tmp_path / "data"
-    if not (data_dir / "basement_events.csv").exists():
-        write_events_csv(data_dir, ["2026/07/01 21:00:00,dehumidifier installed"])
-    return data_dir
+def _events_glob(tmp_path: Path) -> str:
+    events_root = tmp_path / "events"
+    if not events_root.exists():
+        return write_event_store_rows(events_root, ["2026/07/01 21:00:00,dehumidifier installed"])
+    return str(events_root / "year=*" / "*.json")
 
 
 def test_merge_rain_readings_keeps_old_rows_and_prefers_fresh_on_conflict() -> None:

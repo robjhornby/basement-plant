@@ -11,11 +11,11 @@ from urllib.error import HTTPError, URLError
 
 import pytest
 
+from basement_analysis.event_store import EventType
 from basement_analysis.static_site import (
     chart_timestamp_seconds,
     fetch_json_from_url,
     fetch_open_meteo_weather,
-    load_events,
     parse_local_datetime,
     render_index_html,
     render_physics_report_html,
@@ -24,7 +24,9 @@ from basement_analysis.static_site import (
     write_site_pages,
 )
 from basement_analysis.summaries import (
-    Event,
+    Event as SummaryEvent,
+)
+from basement_analysis.summaries import (
     RainReading,
     SensorReading,
     SiteAnalysisSummary,
@@ -33,7 +35,12 @@ from basement_analysis.summaries import (
     build_site_analysis_summary,
 )
 from basement_analysis.timezones import london_wall_clock_to_utc
-from synthetic_tank_series import minutes_after_install, synthetic_series
+from synthetic_tank_series import DEHUMIDIFIER_INSTALLED_AT, minutes_after_install, synthetic_series
+
+
+def custom_event(*, timestamp: datetime, description: str) -> SummaryEvent:
+    """Concise custom-event fixture used by presentation tests."""
+    return SummaryEvent(timestamp=timestamp, event_type=EventType.custom, notes=description)
 
 
 def sensor_reading(
@@ -55,24 +62,6 @@ def sensor_reading(
 def test_parse_local_datetime_accepts_minute_and_second_precision() -> None:
     assert parse_local_datetime("2026/06/28 12:40") == datetime(2026, 6, 28, 12, 40)
     assert parse_local_datetime("2026/07/05 00:51:03") == datetime(2026, 7, 5, 0, 51, 3)
-
-
-def test_load_events_reads_seconds_precision_tank_full_rows(tmp_path: Path) -> None:
-    (tmp_path / "basement_events.csv").write_text(
-        "Time,Event\n"
-        "2026/07/01 21:00,dehumidifier installed\n"
-        "2026/07/05 00:51:03,dehumidifer tank full\n",
-        encoding="utf-8",
-    )
-
-    events = load_events(tmp_path)
-
-    # Timestamps are stored as canonical UTC instants: the naive Europe/London wall-clock
-    # values (BST, +01:00 in July) shift back an hour.
-    assert [(event.timestamp, event.description) for event in events] == [
-        (datetime(2026, 7, 1, 20, 0, tzinfo=UTC), "dehumidifier installed"),
-        (datetime(2026, 7, 4, 23, 51, 3, tzinfo=UTC), "dehumidifer tank full"),
-    ]
 
 
 def weather_hour(
@@ -140,9 +129,7 @@ def test_fetch_open_meteo_weather_drops_hours_with_null_values(tmp_path: Path) -
     )
 
     # Open-Meteo hours are naive Europe/London wall-clock; stored as the UTC instant (BST -1h).
-    assert [hour.timestamp for hour in weather_hours] == [
-        datetime(2026, 7, 2, 23, 0, tzinfo=UTC)
-    ]
+    assert [hour.timestamp for hour in weather_hours] == [datetime(2026, 7, 2, 23, 0, tzinfo=UTC)]
     assert weather_hours[0].temperature_c == 16.0
 
 
@@ -240,11 +227,11 @@ def test_site_analysis_summary_builds_shared_dashboard_and_report_values() -> No
         sensor_reading("2026-07-02T22:00:00", "Living room", 21.0, 58.0),
     ]
     events = [
-        Event(
+        custom_event(
             timestamp=datetime.fromisoformat("2026-06-28T16:20:00"),
             description="Bare floor exposed",
         ),
-        Event(
+        custom_event(
             timestamp=datetime.fromisoformat("2026-07-02T21:00:00"),
             description="Fan orientation uncertain",
         ),
@@ -529,11 +516,11 @@ def test_dashboard_and_report_render_from_shared_summary() -> None:
     summary = build_site_analysis_summary(
         sensor_readings=sensor_readings,
         events=[
-            Event(
+            custom_event(
                 timestamp=datetime.fromisoformat("2026-06-28T16:20:00"),
                 description="Bare floor exposed",
             ),
-            Event(
+            custom_event(
                 timestamp=datetime.fromisoformat("2026-07-02T21:00:00"),
                 description="Fan orientation uncertain",
             ),
@@ -615,7 +602,7 @@ def test_dashboard_renders_self_contained_uplot_charts() -> None:
             sensor_reading("2026-07-02T22:00:00", "Basement", 19.0, 72.0),
         ],
         events=[
-            Event(
+            custom_event(
                 timestamp=datetime.fromisoformat("2026-06-28T16:20:00"),
                 description="Bare floor exposed",
             )
@@ -647,7 +634,7 @@ def test_charts_include_touch_interactions_without_trapping_page_scroll() -> Non
             sensor_reading("2026-07-02T22:00:00", "Basement", 19.0, 72.0),
         ],
         events=[
-            Event(
+            custom_event(
                 timestamp=datetime.fromisoformat("2026-06-28T16:20:00"),
                 description="Bare floor exposed",
             )
@@ -678,7 +665,7 @@ def test_render_site_pages_returns_public_relative_path_to_html_mapping() -> Non
             sensor_reading("2026-07-02T22:00:00", "Basement", 19.0, 72.0),
         ],
         events=[
-            Event(
+            custom_event(
                 timestamp=datetime.fromisoformat("2026-06-28T16:20:00"),
                 description="Bare floor exposed",
             )
@@ -703,7 +690,7 @@ def test_render_private_report_pages_keeps_local_report_available() -> None:
             sensor_reading("2026-07-02T22:00:00", "Basement", 19.0, 72.0),
         ],
         events=[
-            Event(
+            custom_event(
                 timestamp=datetime.fromisoformat("2026-06-28T16:20:00"),
                 description="Bare floor exposed",
             )
@@ -735,10 +722,20 @@ def test_write_site_pages_persists_mapping_under_output_dir(tmp_path: Path) -> N
 def summary_from_tank_series(
     segments: list[tuple[str, int]], tank_full_minutes: tuple[int, ...] = ()
 ) -> SiteAnalysisSummary:
-    tank_full_events = [
-        Event(timestamp=minutes_after_install(minute), description="dehumidifer tank full")
+    tank_full_events: list[SummaryEvent] = [
+        SummaryEvent(
+            timestamp=minutes_after_install(minute),
+            event_type=EventType.dehumidifier_tank_full,
+        )
         for minute in tank_full_minutes
     ]
+    tank_full_events.insert(
+        0,
+        SummaryEvent(
+            timestamp=DEHUMIDIFIER_INSTALLED_AT,
+            event_type=EventType.dehumidifier_installed,
+        ),
+    )
     # synthetic_series builds readings off the canonical UTC install instant, so weather must be
     # on the same UTC timeline for the period joins to line up.
     naive_weather = weather_hour("2026-07-02T22:00:00", 17.0, 68.0)

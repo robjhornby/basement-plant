@@ -4,24 +4,38 @@ from datetime import UTC, datetime, timedelta
 
 from basement_analysis.summaries import SensorReading
 from basement_analysis.tank_estimator import (
-    DEHUMIDIFIER_INSTALLED_AT,
     TankEstimateFailure,
     TankGauge,
     TankHistory,
     displayed_uncertainty_days,
-    estimate_tank_gauge,
-    estimate_tank_history,
     gauge_footer_text,
     uncertainty_words,
 )
+from basement_analysis.tank_estimator import (
+    estimate_tank_gauge as _estimate_tank_gauge,
+)
+from basement_analysis.tank_estimator import (
+    estimate_tank_history as _estimate_tank_history,
+)
 from synthetic_tank_series import (
     CYCLE_PERIOD_MINUTES,
+    DEHUMIDIFIER_INSTALLED_AT,
     TROUGH_RH,
     basement_reading,
     episode_gap_minutes,
     minutes_after_install,
     synthetic_series,
 )
+
+
+def estimate_tank_history(readings: list[SensorReading]) -> TankHistory | TankEstimateFailure:
+    return _estimate_tank_history(readings, DEHUMIDIFIER_INSTALLED_AT)
+
+
+def estimate_tank_gauge(
+    readings: list[SensorReading], tank_full_events: tuple[datetime, ...] | list[datetime]
+) -> TankGauge | TankEstimateFailure:
+    return _estimate_tank_gauge(readings, tank_full_events, DEHUMIDIFIER_INSTALLED_AT)
 
 
 def test_empty_input_reports_failure_instead_of_raising() -> None:
@@ -175,10 +189,7 @@ def test_resumed_cycling_blip_shorter_than_8_hours_does_not_split_an_episode() -
     )
     full_minute = 72 * CYCLE_PERIOD_MINUTES
     emptied_minute = (
-        full_minute
-        + episode_gap_minutes(200)
-        + 9 * CYCLE_PERIOD_MINUTES
-        + episode_gap_minutes(300)
+        full_minute + episode_gap_minutes(200) + 9 * CYCLE_PERIOD_MINUTES + episode_gap_minutes(300)
     )
 
     result = estimate_tank_history(readings)

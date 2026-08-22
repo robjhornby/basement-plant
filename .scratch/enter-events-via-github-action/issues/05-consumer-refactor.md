@@ -1,6 +1,6 @@
 # 05 — Refactor event consumers to the enum + R2 read path
 
-Status: open
+Status: resolved
 Type: task
 Blocked by: 03
 Parent PRD: ../PRD.md
@@ -68,3 +68,12 @@ store (via the curated parquet, per Option (a)).
   output matches the pre-refactor result for the migrated data.
 - hosted + local builds read events from R2; full suite green; pyright strict
   clean; ruff clean.
+
+## Answer / Comments
+
+Implemented the enum-backed `Event(timestamp, event_type, notes)` model and derived display labels,
+with curated parquet carrying UTC timestamp/event type/notes. Hosted curation and local full builds
+now derive current state from the JSON event store via DuckDB; tests inject local event-store globs.
+Tank estimation and both analysis scripts derive the earliest installation event and match tank-full
+events by `EventType`. Zero installs omit/stop the estimate with a clear warning; earliest wins when
+multiple installs exist. Validation: 100 pytest tests pass, Ruff passes, and strict Pyright passes.

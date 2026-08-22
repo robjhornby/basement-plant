@@ -35,7 +35,7 @@ from typing import cast
 import duckdb
 from pydantic import BaseModel, ConfigDict, field_serializer, field_validator, model_validator
 
-from basement_analysis.curated_dataset import configure_r2_access
+from basement_analysis.r2_access import configure_r2_access
 from basement_analysis.timezones import london_wall_clock_to_utc
 
 __all__ = [

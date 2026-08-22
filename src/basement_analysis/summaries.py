@@ -10,12 +10,21 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
+from basement_analysis.event_store import EventType
 from basement_analysis.tank_estimator import (
     TankEstimateFailure,
     estimate_tank_gauge,
     gauge_footer_text,
 )
 from basement_analysis.timezones import utc_to_london_wall_clock
+
+# Canonical human display strings for the non-``custom`` event types. A ``custom`` event *is* its
+# notes text, so it has no fixed label (see :attr:`Event.display_label`).
+EVENT_TYPE_DISPLAY_LABELS = {
+    EventType.dehumidifier_tank_full: "Dehumidifier tank full",
+    EventType.dehumidifier_tank_emptied: "Dehumidifier tank emptied",
+    EventType.dehumidifier_installed: "Dehumidifier installed",
+}
 
 ENVIRONMENT_AGENCY_RAIN_STATION = "270397"
 
@@ -59,7 +68,15 @@ class Event(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     timestamp: datetime
-    description: str
+    event_type: EventType
+    notes: str | None = None
+
+    @property
+    def display_label(self) -> str:
+        """Human-readable text for rendering: a custom event's notes, else the canonical label."""
+        if self.event_type == EventType.custom:
+            return self.notes or ""
+        return EVENT_TYPE_DISPLAY_LABELS[self.event_type]
 
 
 class WeatherHour(BaseModel):
@@ -614,21 +631,47 @@ def build_site_analysis_summary(
     )
 
 
+def installation_datetime(events: Sequence[Event]) -> datetime | None:
+    """The dehumidifier install instant: the earliest ``dehumidifier_installed`` event, or None.
+
+    Limitation (per "prefer simple models, refine with data"): with **no** install event this is
+    None and the tank footer is omitted; with **multiple** install events the earliest wins, no
+    heavier guarding. The migrated log has exactly one install row, so both branches are documented
+    rather than defended.
+    """
+    install_times = [
+        event.timestamp
+        for event in events
+        if event.event_type == EventType.dehumidifier_installed
+    ]
+    return min(install_times) if install_times else None
+
+
 def build_tank_footer_text(
     sensor_readings: Sequence[SensorReading], events: Sequence[Event]
 ) -> str | None:
     """Dehumidifier fuel-gauge footer paragraph, or None (with a build-log warning) on failure.
 
-    The gauge calibrates from the owner-logged tank-full events (rows whose text mentions a
-    full tank), not the RH-rebound detection that is unreliable in the dry regime. An estimator
-    failure must never block site publication: it omits the paragraph and prints a warning so
-    the missing sentence stays discoverable.
+    The gauge calibrates from the owner-logged ``dehumidifier_tank_full`` events, not the
+    RH-rebound detection that is unreliable in the dry regime, and its baseline is the
+    ``dehumidifier_installed`` event in the log (no hardcoded install date). An estimator failure
+    must never block site publication: it omits the paragraph and prints a warning so the missing
+    sentence stays discoverable.
     """
+    installed_at = installation_datetime(events)
+    if installed_at is None:
+        print(
+            "warning: dehumidifier tank footer omitted: no dehumidifier_installed event in the log",
+            file=sys.stderr,
+        )
+        return None
     tank_full_events = [
-        event.timestamp for event in events if "tank full" in event.description.lower()
+        event.timestamp
+        for event in events
+        if event.event_type == EventType.dehumidifier_tank_full
     ]
     try:
-        estimate = estimate_tank_gauge(sensor_readings, tank_full_events)
+        estimate = estimate_tank_gauge(sensor_readings, tank_full_events, installed_at)
     except Exception as error:  # degrade to a footer-less build on any estimator bug
         print(f"warning: dehumidifier tank estimator failed: {error!r}", file=sys.stderr)
         return None
@@ -739,7 +782,7 @@ def build_periods(
             )
             current_start = event.timestamp
             current_label = PERIOD_LABEL_BY_EVENT_TIME.get(
-                format_timestamp(event.timestamp), event.description
+                format_timestamp(event.timestamp), event.display_label
             )
             current_event = event
 
@@ -775,7 +818,7 @@ def summarize_periods(
                 label=period.label,
                 start=period.start,
                 end=period.end,
-                event_description=period.event.description if period.event else "dataset start",
+                event_description=period.event.display_label if period.event else "dataset start",
                 comparability_flags=comparability_flags(period),
                 sensor_samples=len(indoor),
                 mean_temperature_c=mean_or_none(reading.temperature_c for reading in indoor),
@@ -796,7 +839,7 @@ def summarize_periods(
 
 def comparability_flags(period: Period) -> tuple[str, ...]:
     flags: list[str] = []
-    label_and_event = f"{period.label} {period.event.description if period.event else ''}".lower()
+    label_and_event = f"{period.label} {period.event.display_label if period.event else ''}".lower()
     if "sensor" in label_and_event:
         flags.append("sensor-placement artifact risk")
     if "fan" in label_and_event or "dehumidifier" in label_and_event:

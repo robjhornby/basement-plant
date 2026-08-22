@@ -28,7 +28,7 @@ from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
-from basement_analysis.timezones import london_wall_clock_to_utc, utc_to_london_wall_clock
+from basement_analysis.timezones import utc_to_london_wall_clock
 
 
 class BasementReading(Protocol):
@@ -47,9 +47,9 @@ class BasementReading(Protocol):
     def absolute_humidity_g_m3(self) -> float: ...
 
 
-# A canonical UTC instant (2026-07-01 21:00 Europe/London), so it compares directly against the
-# UTC-instant reading timestamps. Ticket 05 will derive this from the logged install event.
-DEHUMIDIFIER_INSTALLED_AT = london_wall_clock_to_utc(datetime(2026, 7, 1, 21, 0))
+# The dehumidifier install instant is no longer hardcoded: callers derive it from the earliest
+# `dehumidifier_installed` event in the log and pass it in as `installed_at` (a canonical UTC
+# instant, comparable directly against the UTC-instant reading timestamps).
 TANK_CAPACITY_LITRES = 25
 
 SMOOTHING_WINDOW_MINUTES = 9
@@ -101,12 +101,13 @@ class TankFullEpisode(BaseModel):
 
 def estimate_tank_history(
     sensor_readings: Sequence[BasementReading],
+    installed_at: datetime,
 ) -> TankHistory | TankEstimateFailure:
     basement_readings = sorted(
         (
             reading
             for reading in sensor_readings
-            if reading.location == "Basement" and reading.timestamp >= DEHUMIDIFIER_INSTALLED_AT
+            if reading.location == "Basement" and reading.timestamp >= installed_at
         ),
         key=lambda reading: reading.timestamp,
     )
@@ -134,7 +135,7 @@ def estimate_tank_history(
             ),
         )
         for started_at, full_at in zip(
-            (DEHUMIDIFIER_INSTALLED_AT, *tank_emptied_events[:-1]),
+            (installed_at, *tank_emptied_events[:-1]),
             tank_full_events,
             strict=True,
         )
@@ -457,18 +458,20 @@ class TankGauge(BaseModel):
 def estimate_tank_gauge(
     sensor_readings: Sequence[BasementReading],
     tank_full_events: Sequence[datetime],
+    installed_at: datetime,
 ) -> TankGauge | TankEstimateFailure:
     """Moisture-drawdown fuel gauge for the current open tank.
 
     Calibrated from the owner-logged `tank_full_events` (not RH-rebound detection,
     which is unreliable in the dry regime). Tank-emptied times are still detected
-    from the signal — cycling clearly resumes after a refill.
+    from the signal — cycling clearly resumes after a refill. `installed_at` is the
+    dehumidifier install instant (derived from the log), the first fill interval's start.
     """
     basement_readings = sorted(
         (
             reading
             for reading in sensor_readings
-            if reading.location == "Basement" and reading.timestamp >= DEHUMIDIFIER_INSTALLED_AT
+            if reading.location == "Basement" and reading.timestamp >= installed_at
         ),
         key=lambda reading: reading.timestamp,
     )
@@ -486,7 +489,7 @@ def estimate_tank_gauge(
     trough_times = [timestamps[index] for index in detect_trough_indices(smoothed)]
 
     emptied_events = [tank_emptied_after(event, trough_times) for event in full_events]
-    interval_starts = [DEHUMIDIFIER_INSTALLED_AT, *emptied_events[:-1]]
+    interval_starts = [installed_at, *emptied_events[:-1]]
     tank_doses = [
         drawdown_dose(cycles, start, full)
         for start, full in zip(interval_starts, full_events, strict=True)

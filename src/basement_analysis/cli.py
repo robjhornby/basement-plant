@@ -51,7 +51,7 @@ def build_site(argv: Sequence[str] | None = None) -> None:
         "--data-dir",
         type=Path,
         default=Path("data"),
-        help="Directory containing thermohygrometer CSV exports and basement_events.csv.",
+        help="Directory containing thermohygrometer CSV exports.",
     )
     parser.add_argument(
         "--output-dir",
@@ -193,12 +193,12 @@ def curate_ingested_r2(argv: Sequence[str] | None = None) -> None:
         help="Local directory where the refreshed partitioned Parquet tree is written.",
     )
     parser.add_argument(
-        "--data-dir",
-        type=Path,
-        default=Path("data"),
+        "--events-glob",
+        default=None,
         help=(
-            "Directory containing the owner-logged basement_events.csv. These events are the "
-            "authoritative history and replace the curated events partition each run."
+            "Glob for the R2 JSON event store, defaulting to s3://$R2_BUCKET/events/year=*/*.json. "
+            "The derived current events are the authoritative history and replace the curated "
+            "events partition each run."
         ),
     )
     parser.add_argument(
@@ -240,7 +240,7 @@ def curate_ingested_r2(argv: Sequence[str] | None = None) -> None:
         object_store_root=args.object_store_root,
         curated_dataset_dir=args.curated_data_dir,
         work_dir=args.work_dir,
-        events_data_dir=args.data_dir,
+        events_glob=args.events_glob,
         existing_curated_dataset_root=args.existing_curated_data_dir,
         refresh_weather=bool(args.refresh_weather),
         rebuild_all=bool(args.rebuild_all),

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
@@ -12,14 +12,24 @@ from basement_analysis.curated_dataset import (
     parse_curated_data_location,
     write_curated_dataset,
 )
+from basement_analysis.event_store import EventType
 from basement_analysis.summaries import (
     ENVIRONMENT_AGENCY_RAIN_STATION,
-    Event,
     RainReading,
     SensorReading,
     WeatherHour,
     absolute_humidity_g_m3,
 )
+from basement_analysis.summaries import (
+    Event as SummaryEvent,
+)
+from event_store_fixtures import write_event_store
+
+
+def custom_event(timestamp: datetime, notes: str) -> SummaryEvent:
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=UTC)
+    return SummaryEvent(timestamp=timestamp, event_type=EventType.custom, notes=notes)
 
 
 def sensor_reading(
@@ -63,10 +73,7 @@ def test_curated_dataset_round_trips_through_partitioned_parquet_and_duckdb(
             sensor_reading("2026-07-02T22:00:00", "Living room", 21.0, 58.0),
         ],
         events=[
-            Event(
-                timestamp=datetime.fromisoformat("2026-06-28T16:20:00"),
-                description="Bare floor exposed",
-            )
+            custom_event(datetime.fromisoformat("2026-06-28T16:20:00+00:00"), "Bare floor exposed")
         ],
         weather_hours=[weather_hour("2026-06-28T15:00:00")],
         rain_readings=[
@@ -90,7 +97,7 @@ def test_curated_dataset_round_trips_through_partitioned_parquet_and_duckdb(
         "Basement",
         "Living room",
     ]
-    assert curated_dataset.events[0].description == "Bare floor exposed"
+    assert curated_dataset.events[0].notes == "Bare floor exposed"
     assert curated_dataset.weather_hours[0].absolute_humidity_g_m3 > 0
     assert curated_dataset.rain_readings[0].rainfall_mm == 0.2
 
@@ -114,15 +121,15 @@ def test_static_site_builds_from_curated_parquet_path(
         ),
         encoding="utf-8",
     )
-    (data_dir / "basement_events.csv").write_text(
-        "\n".join(
-            [
-                "Time,Event",
-                "2026/06/28 16:20,Bare floor exposed",
-                "2026/07/02 21:00,Fan orientation uncertain",
-            ]
-        ),
-        encoding="utf-8",
+    events_glob = write_event_store(
+        tmp_path / "events",
+        [
+            custom_event(datetime.fromisoformat("2026-06-28T16:20:00+00:00"), "Bare floor exposed"),
+            custom_event(
+                datetime.fromisoformat("2026-07-02T21:00:00+00:00"),
+                "Fan orientation uncertain",
+            ),
+        ],
     )
 
     def fake_open_meteo_weather(
@@ -162,6 +169,7 @@ def test_static_site_builds_from_curated_parquet_path(
         data_dir=data_dir,
         output_dir=tmp_path / "site",
         curated_dataset_dir=tmp_path / "curated-data",
+        events_glob=events_glob,
     )
 
     assert result.index_path.exists()
@@ -221,9 +229,9 @@ def test_build_static_site_can_write_private_report_for_local_analysis(
         ),
         encoding="utf-8",
     )
-    (data_dir / "basement_events.csv").write_text(
-        "Time,Event\n2026/06/28 16:20,Bare floor exposed",
-        encoding="utf-8",
+    events_glob = write_event_store(
+        tmp_path / "events",
+        [custom_event(datetime.fromisoformat("2026-06-28T16:20:00+00:00"), "Bare floor exposed")],
     )
 
     def fake_open_meteo_weather(
@@ -264,6 +272,7 @@ def test_build_static_site_can_write_private_report_for_local_analysis(
         output_dir=tmp_path / "site",
         curated_dataset_dir=tmp_path / "curated-data",
         include_private_report=True,
+        events_glob=events_glob,
     )
 
     assert result.index_path.exists()

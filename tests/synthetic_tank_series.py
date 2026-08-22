@@ -7,10 +7,11 @@ expected event timestamps from the construction alone.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from basement_analysis.summaries import SensorReading, absolute_humidity_g_m3
-from basement_analysis.tank_estimator import DEHUMIDIFIER_INSTALLED_AT
+
+DEHUMIDIFIER_INSTALLED_AT = datetime(2026, 7, 1, 20, 0, tzinfo=UTC)
 
 CYCLE_PERIOD_MINUTES = 40
 TROUGH_RH = 60.0
